@@ -25,6 +25,14 @@ const nextConfig = {
   // 實驗性功能
   experimental: {
     optimizePackageImports: ['@radix-ui/react-icons', 'lucide-react'],
+    turbo: {
+      rules: {
+        '*.svg': {
+          loaders: ['@svgr/webpack'],
+          as: '*.js',
+        },
+      },
+    },
   },
   
   // 編譯優化

@@ -1,1 +1,1 @@
-{"status":"healthy","timestamp":"2025-08-25T02:49:05.841Z","uptime":3.674615879,"memory":{"rss":67878912,"heapTotal":26017792,"heapUsed":19175392,"external":3696412,"arrayBuffers":79434},"responseTime":6,"services":{"database":"connected","websocket":"active","fileSystem":"accessible"}}
+{"status":"healthy","timestamp":"2025-08-25T03:28:59.852Z","uptime":8.044113922,"memory":{"rss":63836160,"heapTotal":24174592,"heapUsed":16601544,"external":3696011,"arrayBuffers":79033},"responseTime":27,"services":{"database":"connected","websocket":"active","fileSystem":"accessible"}}
