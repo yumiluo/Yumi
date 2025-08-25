@@ -1,166 +1,151 @@
 import { NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { promisify } from 'util'
 
-const execAsync = promisify(exec)
-
-// 真實設備掃描
-async function scanRealDevices() {
-  const devices = []
-  
+// 智能API選擇器
+async function getDeviceData(action: string, deviceId?: string, connectionMethod?: string) {
+  // 嘗試連接到本地掃描服務器
   try {
-    // 掃描網絡設備 (macOS/Linux)
-    if (process.platform === 'darwin' || process.platform === 'linux') {
-      // 掃描本地網絡
-      const { stdout: arpOutput } = await execAsync('arp -a')
-      const lines = arpOutput.split('\n')
+    const localScannerUrl = 'http://localhost:3002'
+    
+    if (action === 'scan') {
+      const response = await fetch(`${localScannerUrl}/api/devices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, methods: ['wifi', 'bluetooth', 'usb', 'network'] })
+      })
       
-      for (const line of lines) {
-        if (line.includes('incomplete') || line.includes('(incomplete)')) continue
-        
-        const match = line.match(/(\S+)\s+\(([\d.]+)\)\s+at\s+([a-fA-F0-9:]+)/)
-        if (match) {
-          const [, name, ip, mac] = match
-          if (ip && ip !== '0.0.0.0' && ip !== '127.0.0.1') {
-            devices.push({
-              id: `device_${mac.replace(/:/g, '')}`,
-              name: name || `Device ${ip}`,
-              type: 'network',
-              ip: ip,
-              mac: mac,
-              status: 'discovered',
-              capabilities: ['network', 'ping'],
-              connectionMethod: 'wifi',
-              lastSeen: new Date().toISOString()
-            })
-          }
-        }
+      if (response.ok) {
+        const result = await response.json()
+        return { success: true, data: result, source: 'local' }
+      }
+    } else if (action === 'connect' || action === 'disconnect') {
+      const response = await fetch(`${localScannerUrl}/api/devices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, deviceId, connectionMethod })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        return { success: true, data: result, source: 'local' }
+      }
+    } else {
+      const response = await fetch(`${localScannerUrl}/api/devices`)
+      if (response.ok) {
+        const result = await response.json()
+        return { success: true, data: result, source: 'local' }
       }
     }
-    
-    // 掃描藍牙設備 (macOS)
-    if (process.platform === 'darwin') {
-      try {
-        const { stdout: bluetoothOutput } = await execAsync('system_profiler SPBluetoothDataType')
-        const lines = bluetoothOutput.split('\n')
-        let currentDevice = null
-        
-        for (const line of lines) {
-          if (line.includes('Device:') && line.includes('(')) {
-            const match = line.match(/Device:\s+(.+?)\s+\(([^)]+)\)/)
-            if (match) {
-              if (currentDevice) {
-                devices.push(currentDevice)
-              }
-              currentDevice = {
-                id: `bluetooth_${match[2].replace(/[^a-zA-Z0-9]/g, '')}`,
-                name: match[1].trim(),
-                type: 'bluetooth',
-                mac: match[2],
-                status: 'discovered',
-                capabilities: ['bluetooth', 'wireless'],
-                connectionMethod: 'bluetooth',
-                lastSeen: new Date().toISOString()
-              }
-            }
-          }
-        }
-        
-        if (currentDevice) {
-          devices.push(currentDevice)
-        }
-      } catch (error) {
-        console.log('藍牙掃描失敗:', error.message)
-      }
-    }
-    
-    // 掃描USB設備
-    try {
-      if (process.platform === 'darwin') {
-        const { stdout: usbOutput } = await execAsync('system_profiler SPUSBDataType')
-        const lines = usbOutput.split('\n')
-        let currentDevice = null
-        
-        for (const line of lines) {
-          if (line.includes('Product ID:') && line.includes('Vendor ID:')) {
-            const productMatch = line.match(/Product ID:\s+(.+?)\s+Vendor ID:\s+(.+?)\s+\((.+?)\)/)
-            if (productMatch && currentDevice) {
-              currentDevice.name = productMatch[1].trim()
-              currentDevice.vendor = productMatch[3].trim()
-              devices.push(currentDevice)
-              currentDevice = null
-            }
-          } else if (line.includes('Product ID:') && !line.includes('Vendor ID:')) {
-            const productMatch = line.match(/Product ID:\s+(.+)/)
-            if (productMatch) {
-              currentDevice = {
-                id: `usb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                name: productMatch[1].trim(),
-                type: 'usb',
-                status: 'discovered',
-                capabilities: ['usb', 'data_transfer'],
-                connectionMethod: 'usb',
-                lastSeen: new Date().toISOString()
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.log('USB掃描失敗:', error.message)
-    }
-    
-    // 掃描WiFi網絡
-    try {
-      if (process.platform === 'darwin') {
-        const { stdout: wifiOutput } = await execAsync('/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -s')
-        const lines = wifiOutput.split('\n').slice(1) // 跳過標題行
-        
-        for (const line of lines) {
-          if (line.trim()) {
-            const parts = line.split(/\s+/)
-            if (parts.length >= 6) {
-              const ssid = parts[0]
-              const signal = parts[1]
-              const security = parts[6]
-              
-              if (ssid && ssid !== 'SSID') {
-                devices.push({
-                  id: `wifi_${ssid.replace(/[^a-zA-Z0-9]/g, '')}`,
-                  name: ssid,
-                  type: 'wifi',
-                  signal: signal,
-                  security: security,
-                  status: 'discovered',
-                  capabilities: ['wifi', 'internet'],
-                  connectionMethod: 'wifi',
-                  lastSeen: new Date().toISOString()
-                })
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.log('WiFi掃描失敗:', error.message)
-    }
-    
   } catch (error) {
-    console.error('設備掃描錯誤:', error)
+    console.log('本地掃描服務器不可用，使用模擬數據')
   }
-  
-  return devices
+
+  // 如果本地服務器不可用，返回模擬數據
+  return { success: true, data: getMockData(action, deviceId), source: 'mock' }
+}
+
+// 模擬數據生成器
+function getMockData(action: string, deviceId?: string) {
+  const mockDevices = [
+    {
+      id: 'network_router_001',
+      name: 'WiFi Router',
+      type: 'network',
+      ip: '192.168.1.1',
+      mac: 'AA:BB:CC:DD:EE:FF',
+      status: 'discovered',
+      capabilities: ['network', 'internet', 'wifi'],
+      connectionMethod: 'wifi',
+      lastSeen: new Date().toISOString()
+    },
+    {
+      id: 'bluetooth_headphones_001',
+      name: 'Wireless Headphones',
+      type: 'bluetooth',
+      mac: '11:22:33:44:55:66',
+      status: 'discovered',
+      capabilities: ['bluetooth', 'audio', 'wireless'],
+      connectionMethod: 'bluetooth',
+      lastSeen: new Date().toISOString()
+    },
+    {
+      id: 'usb_keyboard_001',
+      name: 'USB Keyboard',
+      type: 'usb',
+      status: 'discovered',
+      capabilities: ['usb', 'input', 'data_transfer'],
+      connectionMethod: 'usb',
+      lastSeen: new Date().toISOString()
+    },
+    {
+      id: 'wifi_network_001',
+      name: 'Home WiFi',
+      type: 'wifi',
+      signal: '-45 dBm',
+      security: 'WPA2',
+      status: 'discovered',
+      capabilities: ['wifi', 'internet', 'secure'],
+      connectionMethod: 'wifi',
+      lastSeen: new Date().toISOString()
+    }
+  ]
+
+  switch (action) {
+    case 'scan':
+      return {
+        success: true,
+        devices: mockDevices,
+        message: `掃描完成，發現 ${mockDevices.length} 個設備 (模擬模式)`,
+        scanTime: new Date().toISOString(),
+        note: '本地掃描服務器未運行，顯示模擬數據'
+      }
+    
+    case 'connect':
+      const deviceToConnect = mockDevices.find(d => d.id === deviceId)
+      if (deviceToConnect) {
+        deviceToConnect.status = 'connected'
+        return {
+          success: true,
+          device: deviceToConnect,
+          message: '設備連接成功 (模擬模式)',
+          note: '本地掃描服務器未運行，使用模擬連接'
+        }
+      }
+      return { success: false, error: '設備不存在' }
+    
+    case 'disconnect':
+      const deviceToDisconnect = mockDevices.find(d => d.id === deviceId)
+      if (deviceToDisconnect) {
+        deviceToDisconnect.status = 'disconnected'
+        return {
+          success: true,
+          message: '設備斷開成功 (模擬模式)',
+          note: '本地掃描服務器未運行，使用模擬斷開'
+        }
+      }
+      return { success: false, error: '設備不存在' }
+    
+    default:
+      return {
+        success: true,
+        devices: mockDevices,
+        message: `發現 ${mockDevices.length} 個設備 (模擬模式)`,
+        scanTime: new Date().toISOString(),
+        note: '本地掃描服務器未運行，顯示模擬數據'
+      }
+  }
 }
 
 export async function GET() {
   try {
-    const devices = await scanRealDevices()
+    const result = await getDeviceData('list')
     
     return NextResponse.json({
       success: true,
-      devices: devices,
-      message: `發現 ${devices.length} 個真實設備`,
-      scanTime: new Date().toISOString()
+      devices: result.data.devices || result.data,
+      message: result.data.message || '設備列表獲取成功',
+      scanTime: result.data.scanTime || new Date().toISOString(),
+      source: result.source,
+      note: result.data.note || ''
     })
   } catch (error) {
     return NextResponse.json(
@@ -179,89 +164,19 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { action, deviceId, connectionMethod } = body
 
-    switch (action) {
-      case 'scan':
-        // 執行真實設備掃描
-        const devices = await scanRealDevices()
-        
-        return NextResponse.json({
-          success: true,
-          devices: devices,
-          message: `掃描完成，發現 ${devices.length} 個設備`,
-          scanTime: new Date().toISOString()
-        })
-
-      case 'connect':
-        // 嘗試連接設備
-        const device = await scanRealDevices()
-        const targetDevice = device.find(d => d.id === deviceId)
-        
-        if (targetDevice) {
-          // 根據設備類型嘗試連接
-          let connectionResult = { success: false, error: '連接方法未實現' }
-          
-          if (targetDevice.type === 'network') {
-            // 測試網絡連接
-            try {
-              const { stdout } = await execAsync(`ping -c 1 -W 1000 ${targetDevice.ip}`)
-              if (stdout.includes('1 packets transmitted, 1 received')) {
-                connectionResult = { success: true, message: '網絡連接成功' }
-                targetDevice.status = 'connected'
-              } else {
-                connectionResult = { success: false, error: '網絡連接失敗' }
-              }
-            } catch (error) {
-              connectionResult = { success: false, error: '網絡不可達' }
-            }
-          } else if (targetDevice.type === 'bluetooth') {
-            // 藍牙連接（需要系統支持）
-            connectionResult = { success: true, message: '藍牙設備已識別' }
-            targetDevice.status = 'connected'
-          } else if (targetDevice.type === 'usb') {
-            // USB設備已連接
-            connectionResult = { success: true, message: 'USB設備已連接' }
-            targetDevice.status = 'connected'
-          } else if (targetDevice.type === 'wifi') {
-            // WiFi網絡已發現
-            connectionResult = { success: true, message: 'WiFi網絡已發現' }
-            targetDevice.status = 'connected'
-          }
-          
-          return NextResponse.json({
-            success: connectionResult.success,
-            device: targetDevice,
-            message: connectionResult.message || connectionResult.error
-          })
-        }
-        
-        return NextResponse.json(
-          { success: false, error: '設備不存在' },
-          { status: 404 }
-        )
-
-      case 'disconnect':
-        // 斷開設備連接
-        const allDevices = await scanRealDevices()
-        const deviceToDisconnect = allDevices.find(d => d.id === deviceId)
-        
-        if (deviceToDisconnect) {
-          deviceToDisconnect.status = 'disconnected'
-          return NextResponse.json({
-            success: true,
-            message: '設備斷開成功'
-          })
-        }
-        
-        return NextResponse.json(
-          { success: false, error: '設備不存在' },
-          { status: 404 }
-        )
-
-      default:
-        return NextResponse.json(
-          { success: false, error: '無效的操作' },
-          { status: 400 }
-        )
+    const result = await getDeviceData(action, deviceId, connectionMethod)
+    
+    if (result.success) {
+      return NextResponse.json({
+        ...result.data,
+        source: result.source,
+        note: result.data.note || ''
+      })
+    } else {
+      return NextResponse.json(
+        { success: false, error: result.data.error || '操作失敗' },
+        { status: 400 }
+      )
     }
   } catch (error) {
     return NextResponse.json(
