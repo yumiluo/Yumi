@@ -1,39 +1,43 @@
 "use client"
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { Button } from "@/components/ui/button"
+import React, { useState, useCallback, useEffect, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { Separator } from "@/components/ui/separator"
 import { 
-  Search, 
   Wifi, 
   Bluetooth, 
+  Usb, 
   Monitor, 
   Smartphone, 
-  Activity,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
+  Zap,
   RefreshCw,
-  Settings,
-  Zap
+  Signal,
+  Shield,
+  Activity,
+  Clock,
+  Info
 } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
 
 interface Device {
   id: string
   name: string
-  type: 'vr' | 'mobile' | 'desktop' | 'tablet'
+  type: 'network' | 'bluetooth' | 'usb' | 'wifi'
   ip?: string
-  macAddress?: string
-  status: 'discovered' | 'connecting' | 'connected' | 'disconnected' | 'error'
+  mac?: string
+  signal?: string
+  security?: string
+  vendor?: string
+  status: 'discovered' | 'connected' | 'disconnected' | 'error'
   capabilities: string[]
-  batteryLevel?: number
-  lastSeen: Date
-  connectionMethod: 'bluetooth' | 'wifi' | 'usb' | 'qr'
-  metadata?: Record<string, any>
+  connectionMethod: string
+  lastSeen: string
 }
 
 interface ScanProgress {
@@ -42,6 +46,11 @@ interface ScanProgress {
   currentMethod: string
   discoveredCount: number
   errorCount: number
+}
+
+interface ConnectionStatus {
+  status: 'connected' | 'disconnected' | 'error'
+  message: string
 }
 
 export function EnhancedDeviceScanner() {
@@ -53,9 +62,12 @@ export function EnhancedDeviceScanner() {
     discoveredCount: 0,
     errorCount: 0
   })
-  const [connectionStatus, setConnectionStatus] = useState<string>('disconnected')
-  const [activeTab, setActiveTab] = useState<string>('all')
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
+    status: 'disconnected',
+    message: '未連接'
+  })
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false)
+  const [selectedMethods, setSelectedMethods] = useState<string[]>(['wifi', 'bluetooth', 'usb', 'network'])
 
   // 初始化連接
   useEffect(() => {
@@ -64,17 +76,26 @@ export function EnhancedDeviceScanner() {
       try {
         const response = await fetch('/api/health')
         if (response.ok) {
-          setConnectionStatus('connected')
+          setConnectionStatus({
+            status: 'connected',
+            message: 'API連接已建立'
+          })
           toast({
             title: "連接成功",
             description: "API連接已建立",
             variant: "default"
           })
         } else {
-          setConnectionStatus('error')
+          setConnectionStatus({
+            status: 'error',
+            message: 'API連接失敗'
+          })
         }
       } catch (error) {
-        setConnectionStatus('error')
+        setConnectionStatus({
+          status: 'error',
+          message: '無法連接到API'
+        })
         toast({
           title: "連接失敗",
           description: "無法連接到API",
@@ -86,21 +107,8 @@ export function EnhancedDeviceScanner() {
     checkConnection()
   }, [])
 
-  // 自動刷新
-  useEffect(() => {
-    if (!autoRefresh) return
-
-    const interval = setInterval(() => {
-      if (connectionStatus === 'connected' && !scanProgress.isScanning) {
-        refreshDevices()
-      }
-    }, 30000) // 30秒刷新一次
-
-    return () => clearInterval(interval)
-  }, [autoRefresh, connectionStatus, scanProgress.isScanning])
-
   // 掃描設備
-  const scanDevices = useCallback(async (methods: string[] = ['wifi', 'bluetooth']) => {
+  const scanDevices = useCallback(async (methods: string[] = ['wifi', 'bluetooth', 'usb', 'network']) => {
     if (scanProgress.isScanning) return
 
     try {
@@ -150,7 +158,7 @@ export function EnhancedDeviceScanner() {
 
       toast({
         title: "掃描完成",
-        description: `發現 ${devices.length} 個設備`,
+        description: `發現 ${devices.length} 個真實設備`,
         variant: "default"
       })
 
@@ -283,28 +291,6 @@ export function EnhancedDeviceScanner() {
     }
   }, [])
 
-  // 過濾設備
-  const filteredDevices = useMemo(() => {
-    if (activeTab === 'all') return devices
-    
-    return devices.filter(device => {
-      switch (activeTab) {
-        case 'vr':
-          return device.type === 'vr'
-        case 'mobile':
-          return device.type === 'mobile'
-        case 'desktop':
-          return device.type === 'desktop'
-        case 'connected':
-          return device.status === 'connected'
-        case 'discovered':
-          return device.status === 'discovered'
-        default:
-          return true
-      }
-    })
-  }, [devices, activeTab])
-
   // 獲取連接統計
   const connectionStats = useMemo(() => {
     const totalDevices = devices.length
@@ -320,239 +306,321 @@ export function EnhancedDeviceScanner() {
     }
   }, [devices])
 
-  // 獲取狀態圖標
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'connected':
-        return <CheckCircle className="h-4 w-4 text-green-500" />
-      case 'connecting':
-        return <Activity className="h-4 w-4 text-yellow-500 animate-pulse" />
-      case 'error':
-        return <XCircle className="h-4 w-4 text-red-500" />
-      case 'discovered':
-        return <AlertTriangle className="h-4 w-4 text-blue-500" />
+  // 獲取設備類型統計
+  const deviceTypeStats = useMemo(() => {
+    const stats = {
+      network: 0,
+      bluetooth: 0,
+      usb: 0,
+      wifi: 0
+    }
+    
+    devices.forEach(device => {
+      if (stats.hasOwnProperty(device.type)) {
+        stats[device.type as keyof typeof stats]++
+      }
+    })
+    
+    return stats
+  }, [devices])
+
+  // 自動刷新
+  useEffect(() => {
+    if (!autoRefresh) return
+
+    const interval = setInterval(() => {
+      refreshDevices()
+    }, 30000) // 30秒刷新一次
+
+    return () => clearInterval(interval)
+  }, [autoRefresh, refreshDevices])
+
+  // 獲取設備圖標
+  const getDeviceIcon = (type: string) => {
+    switch (type) {
+      case 'network':
+        return <Monitor className="h-4 w-4" />
+      case 'bluetooth':
+        return <Bluetooth className="h-4 w-4" />
+      case 'usb':
+        return <Usb className="h-4 w-4" />
+      case 'wifi':
+        return <Wifi className="h-4 w-4" />
       default:
-        return <XCircle className="h-4 w-4 text-gray-500" />
+        return <Smartphone className="h-4 w-4" />
     }
   }
 
-  // 獲取設備類型圖標
-  const getDeviceTypeIcon = (type: string) => {
-    switch (type) {
-      case 'vr':
-        return <Monitor className="h-4 w-4" />
-      case 'mobile':
-        return <Smartphone className="h-4 w-4" />
-      case 'desktop':
-        return <Monitor className="h-4 w-4" />
-      case 'tablet':
-        return <Smartphone className="h-4 w-4" />
+  // 獲取狀態顏色
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'connected':
+        return 'bg-green-500'
+      case 'disconnected':
+        return 'bg-gray-500'
+      case 'error':
+        return 'bg-red-500'
       default:
-        return <Monitor className="h-4 w-4" />
+        return 'bg-blue-500'
     }
   }
 
   return (
     <div className="space-y-6">
-      {/* 連接狀態和掃描控制 */}
+      {/* 掃描控制 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
-            設備掃描器
+            真實設備掃描器
           </CardTitle>
           <CardDescription>
-            發現和連接VR設備、移動設備和桌面設備
+            掃描網絡、藍牙、USB和WiFi設備
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 連接狀態 */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Badge variant={connectionStatus === 'connected' ? 'default' : 'destructive'}>
-                {connectionStatus === 'connected' ? '已連接' : '未連接'}
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                {connectionStatus === 'connected' ? 'WebSocket連接正常' : '無法連接到服務器'}
-              </span>
+          {/* 掃描方法選擇 */}
+          <div className="space-y-2">
+            <Label>選擇掃描方法：</Label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: 'wifi', label: 'WiFi網絡', icon: <Wifi className="h-4 w-4" /> },
+                { key: 'bluetooth', label: '藍牙設備', icon: <Bluetooth className="h-4 w-4" /> },
+                { key: 'usb', label: 'USB設備', icon: <Usb className="h-4 w-4" /> },
+                { key: 'network', label: '網絡設備', icon: <Monitor className="h-4 w-4" /> }
+              ].map(({ key, label, icon }) => (
+                <Button
+                  key={key}
+                  variant={selectedMethods.includes(key) ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    if (selectedMethods.includes(key)) {
+                      setSelectedMethods(prev => prev.filter(m => m !== key))
+                    } else {
+                      setSelectedMethods(prev => [...prev, key])
+                    }
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  {icon}
+                  {label}
+                </Button>
+              ))}
             </div>
-            
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={refreshDevices}
-                disabled={scanProgress.isScanning}
-              >
-                <RefreshCw className="h-4 w-4" />
-                刷新
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={autoRefresh ? 'bg-primary text-primary-foreground' : ''}
-              >
-                <Settings className="h-4 w-4" />
-                自動刷新
-              </Button>
-            </div>
+          </div>
+
+          {/* 掃描按鈕 */}
+          <div className="flex gap-2">
+            <Button 
+              onClick={() => scanDevices(selectedMethods)} 
+              disabled={scanProgress.isScanning || selectedMethods.length === 0}
+              className="flex-1"
+            >
+              <Wifi className="mr-2 h-4 w-4" />
+              {scanProgress.isScanning ? "掃描中..." : "掃描設備"}
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={refreshDevices}
+              disabled={scanProgress.isScanning}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
           </div>
 
           {/* 掃描進度 */}
           {scanProgress.isScanning && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span>正在掃描: {scanProgress.currentMethod}</span>
+              <div className="flex justify-between text-sm">
+                <span>掃描進度: {scanProgress.currentMethod}</span>
                 <span>{scanProgress.progress}%</span>
               </div>
-              <Progress value={scanProgress.progress} className="w-full" />
+              <Progress value={scanProgress.progress} className="h-2" />
             </div>
           )}
 
-          {/* 掃描按鈕 */}
-          <div className="flex gap-2">
-            <Button
-              onClick={() => scanDevices(['wifi'])}
-              disabled={scanProgress.isScanning || connectionStatus !== 'connected'}
-              className="flex-1"
-            >
-              <Wifi className="h-4 w-4 mr-2" />
-              掃描WiFi設備
-            </Button>
-            
-            <Button
-              onClick={() => scanDevices(['bluetooth'])}
-              disabled={scanProgress.isScanning || connectionStatus !== 'connected'}
-              className="flex-1"
-            >
-              <Bluetooth className="h-4 w-4 mr-2" />
-              掃描藍牙設備
-            </Button>
-            
-            <Button
-              onClick={() => scanDevices(['wifi', 'bluetooth'])}
-              disabled={scanProgress.isScanning || connectionStatus !== 'connected'}
-              className="flex-1"
-            >
-              <Search className="h-4 w-4 mr-2" />
-              掃描所有設備
-            </Button>
+          {/* 連接狀態 */}
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${getStatusColor(connectionStatus.status)}`} />
+            <span className="text-sm text-gray-600">{connectionStatus.message}</span>
           </div>
 
-          {/* 統計信息 */}
-          <div className="grid grid-cols-4 gap-4 text-center">
-            <div className="p-3 bg-muted rounded-lg">
-              <div className="text-2xl font-bold text-primary">{connectionStats.totalDevices}</div>
-              <div className="text-xs text-muted-foreground">總設備</div>
-            </div>
-            <div className="p-3 bg-muted rounded-lg">
-              <div className="text-2xl font-bold text-green-600">{connectionStats.connectedDevices}</div>
-              <div className="text-xs text-muted-foreground">已連接</div>
-            </div>
-            <div className="p-3 bg-muted rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">{connectionStats.disconnectedDevices}</div>
-              <div className="text-xs text-muted-foreground">未連接</div>
-            </div>
-            <div className="p-3 bg-muted rounded-lg">
-              <div className="text-2xl font-bold text-red-600">{connectionStats.errorDevices}</div>
-              <div className="text-xs text-muted-foreground">錯誤</div>
-            </div>
+          {/* 自動刷新 */}
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="auto-refresh"
+              checked={autoRefresh}
+              onCheckedChange={setAutoRefresh}
+            />
+            <Label htmlFor="auto-refresh">自動刷新 (30秒)</Label>
           </div>
         </CardContent>
       </Card>
 
+      {/* 統計信息 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <Monitor className="h-5 w-5 text-blue-500" />
+              <div>
+                <p className="text-2xl font-bold">{connectionStats.totalDevices}</p>
+                <p className="text-xs text-gray-500">總設備數</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-green-500" />
+              <div>
+                <p className="text-2xl font-bold">{connectionStats.connectedDevices}</p>
+                <p className="text-xs text-gray-500">已連接</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <Signal className="h-5 w-5 text-gray-500" />
+              <div>
+                <p className="text-2xl font-bold">{deviceTypeStats.wifi}</p>
+                <p className="text-xs text-gray-500">WiFi網絡</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <Bluetooth className="h-5 w-5 text-blue-500" />
+              <div>
+                <p className="text-2xl font-bold">{deviceTypeStats.bluetooth}</p>
+                <p className="text-xs text-gray-500">藍牙設備</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* 設備列表 */}
       <Card>
         <CardHeader>
-          <CardTitle>設備列表</CardTitle>
+          <CardTitle>發現的設備</CardTitle>
           <CardDescription>
-            發現的設備 ({filteredDevices.length})
+            共發現 {devices.length} 個設備
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-6">
-              <TabsTrigger value="all">全部</TabsTrigger>
-              <TabsTrigger value="vr">VR設備</TabsTrigger>
-              <TabsTrigger value="mobile">移動設備</TabsTrigger>
-              <TabsTrigger value="desktop">桌面設備</TabsTrigger>
-              <TabsTrigger value="connected">已連接</TabsTrigger>
-              <TabsTrigger value="discovered">已發現</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value={activeTab} className="mt-4">
-              {filteredDevices.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  {activeTab === 'all' ? '暫無設備' : `暫無${activeTab}設備`}
-                </div>
-              ) : (
-                <div className="grid gap-4">
-                  {filteredDevices.map((device) => (
-                    <div
-                      key={device.id}
-                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        {getDeviceTypeIcon(device.type)}
-                        <div>
-                          <div className="font-medium">{device.name}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {device.ip && `IP: ${device.ip}`}
-                            {device.macAddress && ` • MAC: ${device.macAddress}`}
+          {devices.length === 0 ? (
+            <div className="text-center py-12">
+              <Monitor className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">沒有發現設備</h3>
+              <p className="text-gray-600 mb-4">點擊"掃描設備"來發現網絡上的真實設備</p>
+              <Button onClick={() => scanDevices(selectedMethods)} disabled={scanProgress.isScanning}>
+                <Wifi className="mr-2 h-4 w-4" />
+                開始掃描
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {devices.map((device) => (
+                <Card key={device.id} className="border-l-4 border-l-blue-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          {getDeviceIcon(device.type)}
+                          <h3 className="font-semibold">{device.name}</h3>
+                          <Badge variant="outline" className="text-xs">
+                            {device.type.toUpperCase()}
+                          </Badge>
+                          <Badge 
+                            variant={device.status === 'connected' ? 'default' : 'secondary'}
+                            className="text-xs"
+                          >
+                            {device.status === 'connected' ? '已連接' : 
+                             device.status === 'disconnected' ? '已斷開' : '錯誤'}
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-gray-600">
+                          {device.ip && (
+                            <div className="flex items-center gap-1">
+                              <Monitor className="h-3 w-3" />
+                              <span>IP: {device.ip}</span>
+                            </div>
+                          )}
+                          {device.mac && (
+                            <div className="flex items-center gap-1">
+                              <Activity className="h-3 w-3" />
+                              <span>MAC: {device.mac}</span>
+                            </div>
+                          )}
+                          {device.signal && (
+                            <div className="flex items-center gap-1">
+                              <Signal className="h-3 w-3" />
+                              <span>信號: {device.signal}</span>
+                            </div>
+                          )}
+                          {device.security && (
+                            <div className="flex items-center gap-1">
+                              <Shield className="h-3 w-3" />
+                              <span>安全: {device.security}</span>
+                            </div>
+                          )}
+                          {device.vendor && (
+                            <div className="flex items-center gap-1">
+                              <Info className="h-3 w-3" />
+                              <span>廠商: {device.vendor}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            <span>發現: {new Date(device.lastSeen).toLocaleTimeString()}</span>
                           </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="outline" className="text-xs">
-                              {device.type.toUpperCase()}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              {device.connectionMethod}
-                            </Badge>
-                            {device.batteryLevel && (
-                              <Badge variant="outline" className="text-xs">
-                                電池: {device.batteryLevel}%
+                        </div>
+
+                        {/* 設備能力 */}
+                        <div className="mt-2">
+                          <div className="flex flex-wrap gap-1">
+                            {device.capabilities.map((capability, index) => (
+                              <Badge key={index} variant="outline" className="text-xs">
+                                {capability}
                               </Badge>
-                            )}
+                            ))}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(device.status)}
-                          <span className="text-sm capitalize">{device.status}</span>
-                        </div>
-
-                        <div className="flex gap-2">
-                          {device.status === 'discovered' && (
-                            <Button
-                              size="sm"
-                              onClick={() => connectDevice(device.id)}
-                              disabled={scanProgress.isScanning}
-                            >
-                              連接
-                            </Button>
-                          )}
-                          
-                          {device.status === 'connected' && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => disconnectDevice(device.id)}
-                              disabled={scanProgress.isScanning}
-                            >
-                              斷開
-                            </Button>
-                          )}
-                        </div>
+                      <div className="flex flex-col gap-2 ml-4">
+                        {device.status === 'connected' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => disconnectDevice(device.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            斷開
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            onClick={() => connectDevice(device.id)}
+                            disabled={device.status === 'error'}
+                          >
+                            連接
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
