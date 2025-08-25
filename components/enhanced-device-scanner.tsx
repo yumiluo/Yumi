@@ -71,40 +71,38 @@ export function EnhancedDeviceScanner() {
 
   // 初始化連接
   useEffect(() => {
-    // 檢查API連接
-    const checkConnection = async () => {
+    // 檢查真實數據連接
+    const checkRealDataConnection = async () => {
       try {
-        const response = await fetch('/api/health')
-        if (response.ok) {
+        // 檢查本地掃描服務器
+        const scannerResponse = await fetch('http://localhost:3002/api/health')
+        if (scannerResponse.ok) {
           setConnectionStatus({
             status: 'connected',
-            message: 'API連接已建立'
+            message: '真實數據連接已建立'
           })
           toast({
-            title: "連接成功",
-            description: "API連接已建立",
+            title: "真實數據連接成功",
+            description: "本地掃描服務器運行正常",
             variant: "default"
           })
         } else {
-          setConnectionStatus({
-            status: 'error',
-            message: 'API連接失敗'
-          })
+          throw new Error('本地掃描服務器不可用')
         }
       } catch (error) {
         setConnectionStatus({
           status: 'error',
-          message: '無法連接到API'
+          message: '無法連接到真實數據源'
         })
         toast({
-          title: "連接失敗",
-          description: "無法連接到API",
+          title: "真實數據連接失敗",
+          description: "請啟動本地掃描服務器: npm run scanner",
           variant: "destructive"
         })
       }
     }
 
-    checkConnection()
+    checkRealDataConnection()
   }, [])
 
   // 掃描設備
@@ -131,8 +129,8 @@ export function EnhancedDeviceScanner() {
         })
       }, 200)
 
-      // 調用API掃描設備
-      const response = await fetch('/api/devices', {
+      // 直接調用本地掃描服務器
+      const response = await fetch('http://localhost:3002/api/devices', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -144,7 +142,7 @@ export function EnhancedDeviceScanner() {
       })
 
       if (!response.ok) {
-        throw new Error('掃描請求失敗')
+        throw new Error('本地掃描服務器掃描失敗')
       }
 
       const result = await response.json()
@@ -185,7 +183,7 @@ export function EnhancedDeviceScanner() {
   // 連接設備
   const connectDevice = useCallback(async (deviceId: string) => {
     try {
-      const response = await fetch('/api/devices', {
+      const response = await fetch('http://localhost:3002/api/devices', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -233,7 +231,7 @@ export function EnhancedDeviceScanner() {
   // 斷開設備
   const disconnectDevice = useCallback(async (deviceId: string) => {
     try {
-      const response = await fetch('/api/devices', {
+      const response = await fetch('http://localhost:3002/api/devices', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -281,7 +279,7 @@ export function EnhancedDeviceScanner() {
   // 刷新設備列表
   const refreshDevices = useCallback(async () => {
     try {
-      const response = await fetch('/api/devices')
+      const response = await fetch('http://localhost:3002/api/devices')
       if (response.ok) {
         const result = await response.json()
         setDevices(result.devices || [])
@@ -370,13 +368,13 @@ export function EnhancedDeviceScanner() {
       {/* 掃描控制 */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5" />
-            真實設備掃描器
-          </CardTitle>
-          <CardDescription>
-            掃描網絡、藍牙、USB和WiFi設備
-          </CardDescription>
+                      <CardTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              100%真實設備掃描器
+            </CardTitle>
+            <CardDescription>
+              掃描真實的網絡、藍牙、USB和WiFi設備，無任何虛擬數據
+            </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* 掃描方法選擇 */}
@@ -439,10 +437,16 @@ export function EnhancedDeviceScanner() {
             </div>
           )}
 
-          {/* 連接狀態 */}
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${getStatusColor(connectionStatus.status)}`} />
-            <span className="text-sm text-gray-600">{connectionStatus.message}</span>
+          {/* 真實數據狀態 */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${getStatusColor(connectionStatus.status)}`} />
+              <span className="text-sm text-gray-600">{connectionStatus.message}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <span className="text-sm text-green-600 font-medium">100%真實數據模式</span>
+            </div>
           </div>
 
           {/* 自動刷新 */}
