@@ -20,7 +20,21 @@ import {
   CheckCircle,
   Video,
   Activity,
+  Search,
+  Trash2,
+  Download,
+  Upload as UploadIcon,
+  Globe,
+  Users,
+  MessageCircle,
 } from "lucide-react"
+import { DeviceManagementModal } from "@/components/device-management-modal"
+import { YouTubeSearch } from "@/components/youtube-search"
+import { YouTubePlayer } from "@/components/youtube-player"
+import { VRYouTubePlayer } from "@/components/vr-youtube-player"
+import { EnhancedDeviceScanner } from "@/components/enhanced-device-scanner"
+import { YouTubeStorage, type YouTubeVideo } from "@/lib/youtube-storage"
+import { toast } from "@/components/ui/use-toast"
 
 interface User {
   id: string
@@ -37,6 +51,7 @@ interface Device {
   status: "connected" | "disconnected" | "playing" | "paused" | "error"
   batteryLevel?: number
   lastSeen: string
+  connectionMethod: "bluetooth" | "qr" | "network"
 }
 
 interface VideoItem {
@@ -47,6 +62,11 @@ interface VideoItem {
   duration: string
   thumbnail: string
   url?: string
+  embedUrl?: string
+  country?: string
+  tags?: string[]
+  addedAt?: string
+  viewCount?: number
 }
 
 export default function VRVideoManager() {
@@ -58,8 +78,35 @@ export default function VRVideoManager() {
   const [currentVideo, setCurrentVideo] = useState<VideoItem | null>(null)
   const [playbackState, setPlaybackState] = useState<"playing" | "paused" | "stopped">("stopped")
   const [systemStatus, setSystemStatus] = useState<any>(null)
+  const [showDeviceModal, setShowDeviceModal] = useState(false)
+  const [showYouTubeSearch, setShowYouTubeSearch] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
+  const [activeTab, setActiveTab] = useState<string>('dashboard')
+  const [showRegister, setShowRegister] = useState(false)
 
   useEffect(() => {
+    // 清除LocalStorage中的假影片數據
+    const clearFakeVideos = () => {
+      try {
+        // 檢查是否有假影片數據
+        const storedVideos = localStorage.getItem('vr-travel-videos')
+        if (storedVideos) {
+          const videos = JSON.parse(storedVideos)
+          // 過濾掉沒有embedUrl的假影片
+          const realVideos = videos.filter((v: any) => v.embedUrl && v.embedUrl.includes('youtube.com/embed'))
+          if (realVideos.length !== videos.length) {
+            localStorage.setItem('vr-travel-videos', JSON.stringify(realVideos))
+            console.log('已清除假影片數據，保留真實YouTube影片:', realVideos.length)
+          }
+        }
+      } catch (error) {
+        console.error('清除假影片數據失敗:', error)
+      }
+    }
+
+    // 執行清理
+    clearFakeVideos()
+
     // 檢查用戶登錄狀態
     const savedUser = localStorage.getItem("user")
     if (savedUser) {
@@ -75,41 +122,132 @@ export default function VRVideoManager() {
 
   const loadData = async () => {
     try {
-      // 模擬加載數據
-      setVideos([
-        {
-          id: "1",
-          title: "示例VR視頻",
-          category: "演示",
-          type: "local",
-          duration: "5:30",
-          thumbnail: "/placeholder.svg?height=120&width=200&text=VR+Video",
-        },
-      ])
-      setDevices([])
+      // 從LocalStorage載入YouTube影片
+      const youtubeVideos = YouTubeStorage.getAllVideos()
+      
+      // 只加載設備數據，不載入假影片
+      const devicesResponse = await fetch('http://localhost:3001/api/devices');
+      
+      // 只顯示真實的YouTube影片
+      const realVideos = youtubeVideos.map(v => ({
+        id: v.id,
+        title: v.title,
+        category: v.country,
+        type: 'youtube' as const,
+        duration: v.duration,
+        thumbnail: v.thumbnail,
+        embedUrl: v.embedUrl,
+        country: v.country,
+        tags: v.tags,
+        addedAt: v.addedAt,
+        viewCount: v.viewCount
+      }))
+      
+      setVideos(realVideos)
+      
+      if (devicesResponse.ok) {
+        const devicesData = await devicesResponse.json();
+        setDevices(devicesData.data);
+      }
     } catch (error) {
       console.error("載入數據失敗:", error)
+      // 如果API失敗，至少載入LocalStorage的影片
+      const youtubeVideos = YouTubeStorage.getAllVideos()
+      const localVideos = youtubeVideos.map(v => ({
+        id: v.id,
+        title: v.title,
+        category: v.country,
+        type: 'youtube' as const,
+        duration: v.duration,
+        thumbnail: v.thumbnail,
+        embedUrl: v.embedUrl,
+        country: v.country,
+        tags: v.tags,
+        addedAt: v.addedAt,
+        viewCount: v.viewCount
+      }))
+      setVideos(localVideos)
     }
   }
 
   const handleLogin = async (email: string, password: string) => {
     try {
-      // 模擬登錄
-      const mockUsers: Record<string, { username: string; role: "admin" | "user" }> = {
-        "admin@example.com": { username: "管理員", role: "admin" },
-        "user@example.com": { username: "用戶", role: "user" },
-      }
+      console.log('Login attempt with email:', email);
+      
+      // 調用後端登錄API
+      const response = await fetch('http://localhost:5001/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
 
-      if (mockUsers[email] && password === "123456") {
-        const user: User = { id: "1", email, ...mockUsers[email] }
-        setUser(user)
-        localStorage.setItem("user", JSON.stringify(user))
-        await loadData()
+      const data = await response.json();
+
+      if (data.success) {
+        // 保存JWT token
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('jwt_token', data.token);
+        
+        // 創建用戶對象
+        const user: User = {
+          id: data.user.id,
+          email: data.user.email,
+          username: data.user.email.split('@')[0], // 使用郵箱前綴作為用戶名
+          role: data.user.role === 'controller' ? 'admin' : 'user'
+        };
+        
+        setUser(user);
+        localStorage.setItem("user", JSON.stringify(user));
+        await loadData();
+        
+        console.log('Login successful:', user);
       } else {
-        alert("登錄失敗: 無效的憑證")
+        alert(data.message || "登錄失敗");
       }
     } catch (error) {
-      alert("登錄失敗: " + (error as Error).message)
+      console.error('Login error:', error);
+      alert("登錄失敗: " + (error as Error).message);
+    }
+  }
+
+  const handleRegister = async (email: string, password: string, confirmPassword: string) => {
+    try {
+      console.log('Register attempt with email:', email);
+      
+      // 前端驗證
+      if (password !== confirmPassword) {
+        alert("密碼不匹配");
+        return;
+      }
+      
+      if (password.length < 6) {
+        alert("密碼至少需要6個字符");
+        return;
+      }
+      
+      // 調用後端註冊API
+      const response = await fetch('http://localhost:5001/api/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert(data.message || "註冊成功，請登錄");
+        // 切換回登錄模式
+        setShowRegister(false);
+      } else {
+        alert(data.message || "註冊失敗");
+      }
+    } catch (error) {
+      console.error('Register error:', error);
+      alert("註冊失敗: " + (error as Error).message);
     }
   }
 
@@ -129,66 +267,186 @@ export default function VRVideoManager() {
     }
   }
 
-  const handleScanDevices = async () => {
-    setIsScanning(true)
+  // 處理設備連接（來自藍牙或QR碼）
+  const handleDeviceConnected = (deviceInfo: any) => {
+    const newDevice: Device = {
+      id: deviceInfo.id,
+      name: deviceInfo.name,
+      type: deviceInfo.type === 'vr' ? 'vr' : 'mobile',
+      status: 'connected',
+      lastSeen: new Date().toLocaleString(),
+      connectionMethod: deviceInfo.connectionMethod || 'network'
+    }
+    
+    setDevices(prev => [...prev, newDevice])
+    setIsConnected(true)
+    console.log('新設備已連接:', newDevice)
+  }
+
+  // 處理設備斷開
+  const handleDeviceDisconnected = (deviceId: string) => {
+    setDevices(prev => prev.filter(d => d.id !== deviceId))
+    setIsConnected(devices.length > 1) // 如果還有其他設備則保持連接狀態
+    console.log('設備已斷開:', deviceId)
+  }
+
+  const handleScanDevices = () => {
+    // 直接打開設備管理模態框，跳轉到掃描頁面
+    setShowDeviceModal(true)
+    console.log('打開設備管理模態框進行掃描...')
+  }
+
+  const handleYouTubeVideoSelected = (youtubeVideo: YouTubeVideo) => {
     try {
-      // 模擬設備掃描
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      const mockDevices: Device[] = [
-        {
-          id: "device1",
-          name: "Meta Quest 3",
-          type: "vr",
-          ip: "192.168.1.100",
-          status: "connected",
-          batteryLevel: 85,
-          lastSeen: "剛剛",
-        },
-        {
-          id: "device2",
-          name: "iPhone 15",
-          type: "mobile",
-          ip: "192.168.1.102",
-          status: "connected",
-          batteryLevel: 92,
-          lastSeen: "剛剛",
-        },
-      ]
-      setDevices(mockDevices)
-      setIsConnected(true)
+      // 視頻已經在YouTube搜索組件中自動存儲到localStorage
+      // 這裡只需要重新載入影片列表
+      loadData()
+      console.log('YouTube影片已自動分類並存儲:', youtubeVideo.title, '分類:', youtubeVideo.category)
+      
+      toast({
+        title: "視頻已添加",
+        description: `${youtubeVideo.title} 已自動分類到 ${youtubeVideo.category} 並存儲到本地`,
+      })
     } catch (error) {
-      console.error("設備掃描失敗:", error)
-    } finally {
-      setIsScanning(false)
+      console.error('處理YouTube影片失敗:', error)
+      toast({
+        title: "處理失敗",
+        description: "無法處理選中的YouTube影片",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleRemoveVideo = (videoId: string) => {
+    try {
+      // 從LocalStorage移除YouTube影片
+      const success = YouTubeStorage.removeVideo(videoId)
+      
+      if (success) {
+        // 重新載入影片列表
+        loadData()
+        console.log('影片已從LocalStorage移除:', videoId)
+      } else {
+        console.warn('無法從LocalStorage移除影片')
+      }
+    } catch (error) {
+      console.error('移除影片失敗:', error)
     }
   }
 
   const handlePlayVideo = async (video: VideoItem) => {
     try {
+      // 設置當前視頻和播放狀態
       setCurrentVideo(video)
       setPlaybackState("playing")
       console.log("播放視頻:", video.title)
+      
+      // 檢查是否有連接的設備
+      if (devices.length === 0) {
+        // 沒有設備時，仍然可以播放視頻進行預覽
+        toast({
+          title: "視頻播放中",
+          description: `${video.title} 正在播放（預覽模式）`,
+        })
+        return
+      }
+      
+      // 選擇第一個連接的設備
+      const device = devices.find(d => d.status === 'connected');
+      if (!device) {
+        // 沒有可用設備時，仍然可以播放視頻進行預覽
+        toast({
+          title: "視頻播放中",
+          description: `${video.title} 正在播放（預覽模式）`,
+        })
+        return
+      }
+      
+      // 有設備時，嘗試調用播放API
+      try {
+        const response = await fetch('http://localhost:3001/api/play', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            deviceId: device.id,
+            videoId: video.id
+          }),
+        });
+        
+        if (response.ok) {
+          console.log("播放視頻:", video.title, "在設備:", device.name)
+          toast({
+            title: "播放成功",
+            description: `${video.title} 正在設備 ${device.name} 上播放`,
+          })
+        } else {
+          console.warn("API播放失敗，但本地播放已開始")
+          toast({
+            title: "本地播放",
+            description: `${video.title} 正在本地播放`,
+          })
+        }
+      } catch (apiError) {
+        console.warn("API調用失敗，但本地播放已開始:", apiError)
+        toast({
+          title: "本地播放",
+          description: `${video.title} 正在本地播放`,
+        })
+      }
     } catch (error) {
       console.error("播放失敗:", error)
+      toast({
+        title: "播放失敗",
+        description: "無法播放視頻，請重試",
+        variant: "destructive",
+      })
     }
   }
 
   const handlePauseVideo = async () => {
     try {
-      setPlaybackState("paused")
-      console.log("暫停播放")
+      // 調用真實的暫停API
+      const response = await fetch('http://localhost:3001/api/pause', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        setPlaybackState("paused")
+        console.log("視頻已暫停")
+      } else {
+        alert("暫停失敗");
+      }
     } catch (error) {
       console.error("暫停失敗:", error)
+      alert("暫停失敗: " + error)
     }
   }
 
   const handleStopVideo = async () => {
     try {
-      setCurrentVideo(null)
-      setPlaybackState("stopped")
-      console.log("停止播放")
+      // 調用真實的停止API
+      const response = await fetch('http://localhost:3001/api/stop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        setCurrentVideo(null)
+        setPlaybackState("stopped")
+        console.log("視頻已停止")
+      } else {
+        alert("停止失敗");
+      }
     } catch (error) {
       console.error("停止失敗:", error)
+      alert("停止失敗: " + error)
     }
   }
 
@@ -197,17 +455,26 @@ export default function VRVideoManager() {
     if (!file) return
 
     try {
-      // 模擬文件上傳
-      const newVideo: VideoItem = {
-        id: Date.now().toString(),
-        title: file.name,
-        category: "上傳",
-        type: "local",
-        duration: "未知",
-        thumbnail: "/placeholder.svg?height=120&width=200&text=VR+Video",
+      // 創建FormData進行真實的文件上傳
+      const formData = new FormData();
+      formData.append('video', file);
+      formData.append('title', file.name);
+      formData.append('category', '上傳');
+      formData.append('description', '用戶上傳的視頻文件');
+      
+      const response = await fetch('http://localhost:3001/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        // 重新加載視頻列表
+        await loadData();
+        alert("上傳成功: " + file.name);
+      } else {
+        alert("上傳失敗");
       }
-      setVideos((prev) => [...prev, newVideo])
-      console.log("上傳成功:", file.name)
     } catch (error) {
       alert("上傳失敗: " + (error as Error).message)
     }
@@ -215,15 +482,80 @@ export default function VRVideoManager() {
 
   const runDiagnostics = async () => {
     try {
-      const diagnostics = {
-        network: { connected: true, latency: 45 },
-        websocket: { connected: isConnected },
-        webgl: { webgl1: true, webgl2: true },
-        webrtc: true,
+      // 測試網絡連接
+      const networkStart = Date.now()
+      let networkConnected = false
+      let latency = 0
+      
+      try {
+        const response = await fetch('http://localhost:5001/api/health')
+        if (response.ok) {
+          networkConnected = true
+          latency = Date.now() - networkStart
+        }
+      } catch (error) {
+        console.log('網絡連接測試失敗:', error)
       }
+      
+      // 測試WebSocket連接
+      let websocketConnected = false
+      try {
+        // 創建臨時Socket.io連接進行測試
+        const { io } = await import('socket.io-client')
+        const testSocket = io('http://localhost:5001', {
+          transports: ['polling', 'websocket'],
+          timeout: 5000,
+          forceNew: true
+        })
+        
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('WebSocket連接超時'))
+          }, 5000)
+          
+          testSocket.on('connect', () => {
+            clearTimeout(timeout)
+            websocketConnected = true
+            testSocket.disconnect()
+            resolve(true)
+          })
+          
+          testSocket.on('connect_error', (error) => {
+            clearTimeout(timeout)
+            reject(error)
+          })
+        })
+      } catch (error) {
+        console.log('WebSocket連接測試失敗:', error)
+      }
+      
+      const diagnostics = {
+        network: { 
+          connected: networkConnected, 
+          latency: latency || 0 
+        },
+        websocket: { 
+          connected: websocketConnected 
+        },
+        webgl: { 
+          webgl1: !!document.createElement('canvas').getContext('webgl'),
+          webgl2: !!document.createElement('canvas').getContext('webgl2')
+        },
+        webrtc: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      }
+      
       setSystemStatus(diagnostics)
+      console.log('系統診斷完成:', diagnostics)
     } catch (error) {
       console.error("診斷失敗:", error)
+      // 設置錯誤狀態
+      setSystemStatus({
+        network: { connected: false, latency: 0 },
+        websocket: { connected: false },
+        webgl: { webgl1: false, webgl2: false },
+        webrtc: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
@@ -234,41 +566,96 @@ export default function VRVideoManager() {
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold text-gray-900">VR視頻管理系統</CardTitle>
-            <CardDescription>請登錄或以訪客身份繼續</CardDescription>
+            <CardDescription>
+              {showRegister ? '創建新帳戶' : '請登錄或以訪客身份繼續'}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <input
-                type="email"
-                placeholder="郵箱地址"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                id="email"
-              />
-              <input
-                type="password"
-                placeholder="密碼"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                id="password"
-              />
-            </div>
-            <Button
-              className="w-full"
-              onClick={() => {
-                const email = (document.getElementById("email") as HTMLInputElement).value
-                const password = (document.getElementById("password") as HTMLInputElement).value
-                handleLogin(email, password)
-              }}
-            >
-              登錄
-            </Button>
-            <Button variant="outline" className="w-full bg-transparent" onClick={handleGuestLogin}>
-              訪客模式
-            </Button>
-            <div className="text-center text-sm text-gray-600">
-              <p>測試帳戶:</p>
-              <p>admin@example.com / 123456</p>
-              <p>user@example.com / 123456</p>
-            </div>
+            {!showRegister ? (
+              // 登錄表單
+              <>
+                <div className="space-y-2">
+                  <input
+                    type="email"
+                    placeholder="郵箱地址"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="login-email"
+                  />
+                  <input
+                    type="password"
+                    placeholder="密碼"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="login-password"
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    const email = (document.getElementById("login-email") as HTMLInputElement).value
+                    const password = (document.getElementById("login-password") as HTMLInputElement).value
+                    handleLogin(email, password)
+                  }}
+                >
+                  登錄
+                </Button>
+                <Button variant="outline" className="w-full bg-transparent" onClick={handleGuestLogin}>
+                  訪客模式
+                </Button>
+                <div className="text-center">
+                  <Button
+                    variant="link"
+                    className="text-blue-600 hover:text-blue-800"
+                    onClick={() => setShowRegister(true)}
+                  >
+                    沒有帳戶？點擊註冊
+                  </Button>
+                </div>
+              </>
+            ) : (
+              // 註冊表單
+              <>
+                <div className="space-y-2">
+                  <input
+                    type="email"
+                    placeholder="郵箱地址"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="register-email"
+                  />
+                  <input
+                    type="password"
+                    placeholder="密碼（至少6個字符）"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="register-password"
+                  />
+                  <input
+                    type="password"
+                    placeholder="確認密碼"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="register-confirm-password"
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    const email = (document.getElementById("register-email") as HTMLInputElement).value
+                    const password = (document.getElementById("register-password") as HTMLInputElement).value
+                    const confirmPassword = (document.getElementById("register-confirm-password") as HTMLInputElement).value
+                    handleRegister(email, password, confirmPassword)
+                  }}
+                >
+                  註冊
+                </Button>
+                <div className="text-center">
+                  <Button
+                    variant="link"
+                    className="text-blue-600 hover:text-blue-800"
+                    onClick={() => setShowRegister(false)}
+                  >
+                    已有帳戶？點擊登錄
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -304,7 +691,7 @@ export default function VRVideoManager() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs defaultValue="dashboard" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="dashboard">儀表板</TabsTrigger>
             <TabsTrigger value="devices">設備管理</TabsTrigger>
@@ -392,69 +779,7 @@ export default function VRVideoManager() {
 
           {/* 設備管理 */}
           <TabsContent value="devices" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold">設備管理</h2>
-              <Button onClick={handleScanDevices} disabled={isScanning}>
-                <Wifi className="mr-2 h-4 w-4" />
-                {isScanning ? "掃描中..." : "掃描設備"}
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {devices.map((device) => (
-                <Card key={device.id}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">{device.name}</CardTitle>
-                      <Badge variant={device.status === "connected" ? "default" : "secondary"}>{device.status}</Badge>
-                    </div>
-                    <CardDescription>
-                      {device.type === "vr" ? (
-                        <Monitor className="inline mr-1 h-4 w-4" />
-                      ) : (
-                        <Smartphone className="inline mr-1 h-4 w-4" />
-                      )}
-                      {device.type.toUpperCase()} 設備
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>IP地址:</span>
-                        <span>{device.ip || "N/A"}</span>
-                      </div>
-                      {device.batteryLevel && (
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-sm">
-                            <span>電池:</span>
-                            <span>{device.batteryLevel}%</span>
-                          </div>
-                          <Progress value={device.batteryLevel} className="h-2" />
-                        </div>
-                      )}
-                      <div className="flex justify-between text-sm">
-                        <span>最後連接:</span>
-                        <span>{device.lastSeen}</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            {devices.length === 0 && (
-              <Card>
-                <CardContent className="text-center py-12">
-                  <Monitor className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">沒有連接的設備</h3>
-                  <p className="text-gray-600 mb-4">點擊"掃描設備"來發現網絡上的VR設備</p>
-                  <Button onClick={handleScanDevices} disabled={isScanning}>
-                    <Wifi className="mr-2 h-4 w-4" />
-                    開始掃描
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+            <EnhancedDeviceScanner />
           </TabsContent>
 
           {/* 視頻管理 */}
@@ -462,6 +787,14 @@ export default function VRVideoManager() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold">視頻管理</h2>
               <div className="space-x-2">
+                <Button 
+                  variant="outline"
+                  onClick={() => setShowYouTubeSearch(true)}
+                  className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                >
+                  <Search className="mr-2 h-4 w-4" />
+                  搜索YouTube VR影片
+                </Button>
                 <input type="file" accept="video/*" onChange={handleFileUpload} className="hidden" id="video-upload" />
                 <Button onClick={() => document.getElementById("video-upload")?.click()}>
                   <Upload className="mr-2 h-4 w-4" />
@@ -469,29 +802,117 @@ export default function VRVideoManager() {
                 </Button>
               </div>
             </div>
+            
+            {/* 視頻分類過濾 */}
+            <div className="flex flex-wrap gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setSelectedCategory('all')
+                  loadData()
+                }}
+                className={`${selectedCategory === 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : ''}`}
+              >
+                全部
+              </Button>
+              {['亞洲', '歐洲', '中東', '非洲', '北美洲', '南美洲', '大洋洲', '北極', '南極'].map((category) => (
+                <Button
+                  key={category}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedCategory(category)
+                    // 過濾影片
+                    const allVideos = YouTubeStorage.getAllVideos()
+                    const filteredVideos = allVideos
+                      .filter(v => v.country === category)
+                      .map(v => ({
+                        id: v.id,
+                        title: v.title,
+                        category: v.country,
+                        type: 'youtube' as const,
+                        duration: v.duration,
+                        thumbnail: v.thumbnail,
+                        embedUrl: v.embedUrl,
+                        country: v.country,
+                        tags: v.tags,
+                        addedAt: v.addedAt,
+                        viewCount: v.viewCount
+                      }))
+                    setVideos(filteredVideos)
+                  }}
+                  className={`${selectedCategory === category ? 'bg-blue-50 border-blue-200 text-blue-700' : ''}`}
+                >
+                  {category}
+                </Button>
+              ))}
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {videos.map((video) => (
-                <Card key={video.id}>
-                  <CardHeader>
-                    <img
-                      src={video.thumbnail || "/placeholder.svg"}
-                      alt={video.title}
-                      className="w-full h-32 object-cover rounded"
-                    />
-                  </CardHeader>
-                  <CardContent>
-                    <h3 className="font-semibold mb-2">{video.title}</h3>
-                    <div className="space-y-1 text-sm text-gray-600">
-                      <p>類別: {video.category}</p>
-                      <p>時長: {video.duration}</p>
-                      <p>類型: {video.type === "youtube" ? "YouTube" : "本地文件"}</p>
+                <Card key={video.id} className="hover:shadow-md transition-shadow">
+                  <CardHeader className="p-4">
+                    <div className="relative">
+                      <img
+                        src={video.thumbnail || "/placeholder.svg"}
+                        alt={video.title}
+                        className="w-full h-32 object-cover rounded"
+                      />
+                      {video.type === "youtube" && (
+                        <Badge className="absolute top-2 right-2 bg-red-600">
+                          YouTube
+                        </Badge>
+                      )}
+                      {video.viewCount !== undefined && video.viewCount > 0 && (
+                        <div className="absolute bottom-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+                          👁 {video.viewCount}
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-4 space-x-2">
-                      <Button size="sm" onClick={() => handlePlayVideo(video)} disabled={devices.length === 0}>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <h3 className="font-semibold mb-2 line-clamp-2 text-sm">{video.title}</h3>
+                    <div className="space-y-1 text-xs text-gray-600">
+                      <p>地區: {video.category}</p>
+                      <p>時長: {video.duration}</p>
+                      <p>類型: {video.type === "youtube" ? "YouTube 360°" : "本地文件"}</p>
+                      {video.addedAt && (
+                        <p>添加: {new Date(video.addedAt).toLocaleDateString()}</p>
+                      )}
+                      {video.tags && video.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {video.tags.slice(0, 3).map((tag, index) => (
+                            <Badge key={index} variant="outline" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <Button 
+                        size="sm" 
+                        onClick={() => {
+                          handlePlayVideo(video)
+                          // 跳轉到播放控制頁面
+                          setActiveTab('control')
+                        }} 
+                        className="flex-1"
+                      >
                         <Play className="mr-1 h-3 w-3" />
                         播放
                       </Button>
+                      {video.type === "youtube" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRemoveVideo(video.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -502,11 +923,14 @@ export default function VRVideoManager() {
               <Card>
                 <CardContent className="text-center py-12">
                   <Video className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">沒有視頻</h3>
-                  <p className="text-gray-600 mb-4">上傳您的第一個VR視頻</p>
-                  <Button onClick={() => document.getElementById("video-upload")?.click()}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    上傳視頻
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">沒有YouTube VR影片</h3>
+                  <p className="text-gray-600 mb-4">請搜索並添加YouTube VR/360度旅遊影片</p>
+                  <Button 
+                    onClick={() => setShowYouTubeSearch(true)}
+                    className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    搜索YouTube VR影片
                   </Button>
                 </CardContent>
               </Card>
@@ -515,6 +939,7 @@ export default function VRVideoManager() {
 
           {/* 播放控制 */}
           <TabsContent value="control" className="space-y-6">
+            {/* 現有的播放控制面板 */}
             <Card>
               <CardHeader>
                 <CardTitle>播放控制面板</CardTitle>
@@ -573,7 +998,106 @@ export default function VRVideoManager() {
                 )}
               </CardContent>
             </Card>
+
+            {/* VR旅遊團功能 - 整合到現有系統 */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Globe className="h-5 w-5" />
+                  VR旅遊團同步播放
+                </CardTitle>
+                <CardDescription>
+                  創建旅遊團，與朋友一起同步觀看VR 360度旅遊視頻
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* 旅遊團狀態顯示 */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div className="text-center p-4 bg-blue-50 rounded-lg">
+                    <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
+                    <div className="text-2xl font-bold text-blue-600">{devices.length}</div>
+                    <div className="text-sm text-blue-600">連接設備</div>
+                  </div>
+                  <div className="text-center p-4 bg-green-50 rounded-lg">
+                    <Video className="h-8 w-8 text-green-600 mx-auto mb-2" />
+                    <div className="text-2xl font-bold text-green-600">{videos.length}</div>
+                    <div className="text-sm text-green-600">可用視頻</div>
+                  </div>
+                  <div className="text-center p-4 bg-purple-50 rounded-lg">
+                    <Globe className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+                    <div className="text-2xl font-bold text-purple-600">0</div>
+                    <div className="text-sm text-purple-600">活躍旅遊團</div>
+                  </div>
+                </div>
+
+                {/* 旅遊團控制按鈕 */}
+                <div className="flex flex-wrap gap-3 justify-center">
+                  <Button 
+                    size="lg"
+                    onClick={() => setShowYouTubeSearch(true)}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    搜索旅遊視頻
+                  </Button>
+                  <Button 
+                    size="lg" 
+                    variant="outline"
+                    onClick={() => {
+                      // 創建旅遊團邏輯
+                      toast({
+                        title: "旅遊團功能",
+                        description: "VR旅遊團功能已整合到現有系統中",
+                      })
+                    }}
+                  >
+                    <Users className="mr-2 h-4 w-4" />
+                    創建旅遊團
+                  </Button>
+                  <Button 
+                    size="lg" 
+                    variant="outline"
+                    disabled={!currentVideo}
+                    onClick={() => {
+                      if (currentVideo) {
+                        toast({
+                          title: "開始旅遊團",
+                          description: `已選擇視頻: ${currentVideo.title}`,
+                        })
+                      }
+                    }}
+                  >
+                    <Play className="mr-2 h-4 w-4" />
+                    開始同步播放
+                  </Button>
+                </div>
+
+                {/* 旅遊團信息提示 */}
+                <div className="text-center text-sm text-gray-600 bg-gray-50 p-4 rounded-lg">
+                  <p className="font-medium mb-2">💡 VR旅遊團功能說明</p>
+                  <p>• 搜索並選擇VR 360度旅遊視頻</p>
+                  <p>• 創建旅遊團邀請朋友加入</p>
+                  <p>• 所有參與者同步觀看同一視頻</p>
+                  <p>• 支持實時聊天和互動</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* VR播放器 */}
+            {currentVideo && currentVideo.type === 'youtube' && currentVideo.embedUrl && (
+              <VRYouTubePlayer
+                videoId={currentVideo.id}
+                title={currentVideo.title}
+                embedUrl={currentVideo.embedUrl}
+                onPlay={() => setPlaybackState("playing")}
+                onPause={() => setPlaybackState("paused")}
+                onStop={() => setPlaybackState("stopped")}
+                isPlaying={playbackState === "playing"}
+              />
+            )}
           </TabsContent>
+
+
 
           {/* 系統診斷 */}
           <TabsContent value="diagnostics" className="space-y-6">
@@ -645,6 +1169,14 @@ export default function VRVideoManager() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* YouTube搜索模態框 */}
+      {showYouTubeSearch && (
+        <YouTubeSearch
+          onVideoSelected={handleYouTubeVideoSelected}
+          onClose={() => setShowYouTubeSearch(false)}
+        />
+      )}
     </div>
   )
 }

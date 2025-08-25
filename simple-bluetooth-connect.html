@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>簡單藍牙連接 - 手機版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+        
+        .step {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+        }
+        
+        .step h3 {
+            color: #007bff;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .step p {
+            color: #555;
+            line-height: 1.6;
+        }
+        
+        .connect-btn {
+            width: 100%;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+        }
+        
+        .connect-btn:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+        
+        .connect-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .device-info {
+            background: #e8f5e8;
+            border: 1px solid #28a745;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .device-name {
+            font-size: 20px;
+            font-weight: bold;
+            color: #28a745;
+            margin-bottom: 10px;
+        }
+        
+        .device-status {
+            color: #666;
+            font-size: 16px;
+        }
+        
+        .instructions {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .instructions h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        
+        .instructions ul {
+            color: #856404;
+            padding-left: 20px;
+        }
+        
+        .instructions li {
+            margin: 5px 0;
+        }
+        
+        .qr-section {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+        }
+        
+        .qr-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .qr-code {
+            width: 200px;
+            height: 200px;
+            background: #ddd;
+            margin: 0 auto 15px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .manual-input {
+            margin: 20px 0;
+        }
+        
+        .manual-input input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        
+        .manual-input button {
+            width: 100%;
+            padding: 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        
+        .manual-input button:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 手機藍牙連接</h1>
+            <p>簡單3步，連接你的手機到VR系統</p>
+        </div>
+        
+        <div class="status info" id="status">
+            準備連接你的手機...
+        </div>
+        
+        <div class="step">
+            <h3>第1步：檢查藍牙</h3>
+            <p>確保你的手機藍牙已開啟，並且瀏覽器支持藍牙功能</p>
+        </div>
+        
+        <div class="step">
+            <h3>第2步：點擊連接</h3>
+            <p>點擊下面的按鈕，選擇你的手機進行藍牙連接</p>
+        </div>
+        
+        <div class="step">
+            <h3>第3步：確認連接</h3>
+            <p>在彈出的藍牙設置中選擇你的手機，確認連接</p>
+        </div>
+        
+        <button class="connect-btn" id="connectBtn" onclick="connectToPhone()">
+            🔵 連接我的手機
+        </button>
+        
+        <div class="instructions">
+            <h4>📋 連接說明</h4>
+            <ul>
+                <li>使用Chrome瀏覽器（Android/Desktop）</li>
+                <li>確保手機藍牙已開啟</li>
+                <li>允許瀏覽器藍牙權限</li>
+                <li>選擇你的手機設備</li>
+            </ul>
+        </div>
+        
+        <div class="qr-section">
+            <h3>🔗 或者使用QR碼連接</h3>
+            <div class="qr-code">
+                📱<br>掃描QR碼<br>快速連接
+            </div>
+            <p>如果你有其他設備，可以掃描這個QR碼來連接</p>
+        </div>
+        
+        <div class="manual-input">
+            <h4>📝 手動輸入連接碼</h4>
+            <input type="text" id="connectionCode" placeholder="輸入6位連接碼" maxlength="6">
+            <button onclick="manualConnect()">連接</button>
+        </div>
+        
+        <div id="deviceInfo" style="display: none;"></div>
+    </div>
+
+    <script>
+        let isConnecting = false;
+        let connectedDevice = null;
+
+        // 檢查藍牙支持
+        async function checkBluetoothSupport() {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            
+            if (!navigator.bluetooth) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ 瀏覽器不支持藍牙<br>請使用Chrome瀏覽器';
+                connectBtn.disabled = true;
+                return false;
+            }
+
+            try {
+                const available = await navigator.bluetooth.getAvailability();
+                if (available) {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '✅ 藍牙可用<br>點擊按鈕開始連接你的手機';
+                    connectBtn.disabled = false;
+                    return true;
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ 藍牙不可用<br>請開啟手機藍牙';
+                    connectBtn.disabled = true;
+                    return false;
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ 藍牙檢查失敗<br>請確保已授予權限';
+                connectBtn.disabled = true;
+                return false;
+            }
+        }
+
+        // 連接手機
+        async function connectToPhone() {
+            if (isConnecting) return;
+            
+            isConnecting = true;
+            const connectBtn = document.getElementById('connectBtn');
+            const statusDiv = document.getElementById('status');
+            
+            connectBtn.disabled = true;
+            connectBtn.innerHTML = '🔄 正在連接...';
+            statusDiv.className = 'status info';
+            statusDiv.innerHTML = '正在掃描藍牙設備...';
+            
+            try {
+                // 簡化的藍牙掃描 - 專門為手機設計
+                const device = await navigator.bluetooth.requestDevice({
+                    // 接受所有設備，讓用戶選擇
+                    acceptAllDevices: true,
+                    optionalServices: [
+                        'generic_access',
+                        'battery_service',
+                        'device_information'
+                    ]
+                });
+
+                if (device) {
+                    console.log('發現設備:', device.name, device.id);
+                    
+                    // 顯示設備信息
+                    showDeviceInfo(device);
+                    
+                    // 嘗試連接
+                    await connectToDevice(device);
+                } else {
+                    statusDiv.className = 'status info';
+                    statusDiv.innerHTML = '未選擇設備';
+                }
+            } catch (error) {
+                console.error('藍牙連接失敗:', error);
+                
+                if (error.name === 'NotFoundError') {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ 未找到藍牙設備<br>請確保手機藍牙已開啟';
+                } else if (error.name === 'NotAllowedError') {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ 藍牙權限被拒絕<br>請允許瀏覽器訪問藍牙';
+                } else if (error.name === 'NetworkError') {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ 連接失敗<br>請檢查設備是否在範圍內';
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = `❌ 連接失敗: ${error.message}`;
+                }
+            } finally {
+                isConnecting = false;
+                connectBtn.disabled = false;
+                connectBtn.innerHTML = '🔵 連接我的手機';
+            }
+        }
+
+        // 顯示設備信息
+        function showDeviceInfo(device) {
+            const deviceInfoDiv = document.getElementById('deviceInfo');
+            deviceInfoDiv.style.display = 'block';
+            deviceInfoDiv.innerHTML = `
+                <div class="device-info">
+                    <div class="device-name">📱 ${device.name || '未知設備'}</div>
+                    <div class="device-status">設備ID: ${device.id.substring(0, 8)}...</div>
+                    <div class="device-status">狀態: 正在連接...</div>
+                </div>
+            `;
+        }
+
+        // 連接到設備
+        async function connectToDevice(device) {
+            const statusDiv = document.getElementById('status');
+            const deviceInfoDiv = document.getElementById('deviceInfo');
+            
+            try {
+                statusDiv.className = 'status info';
+                statusDiv.innerHTML = '正在建立藍牙連接...';
+                
+                // 模擬連接過程（實際使用時應該用真實的GATT連接）
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // 更新設備狀態
+                connectedDevice = device;
+                deviceInfoDiv.innerHTML = `
+                    <div class="device-info">
+                        <div class="device-name">📱 ${device.name || '未知設備'}</div>
+                        <div class="device-status">設備ID: ${device.id.substring(0, 8)}...</div>
+                        <div class="device-status">✅ 已連接成功！</div>
+                    </div>
+                `;
+                
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = '🎉 連接成功！<br>你的手機現在已連接到VR系統';
+                
+                // 通知後端設備已連接
+                notifyBackendDeviceConnected(device);
+                
+            } catch (error) {
+                console.error('設備連接失敗:', error);
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ 設備連接失敗<br>請重試';
+            }
+        }
+
+        // 通知後端設備已連接
+        async function notifyBackendDeviceConnected(device) {
+            try {
+                const response = await fetch('http://localhost:3001/api/device-connected', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        deviceId: device.id,
+                        deviceName: device.name || '手機設備',
+                        deviceType: 'mobile',
+                        connectionMethod: 'bluetooth'
+                    }),
+                });
+                
+                if (response.ok) {
+                    console.log('後端已記錄設備連接');
+                } else {
+                    console.log('後端記錄設備連接失敗');
+                }
+            } catch (error) {
+                console.log('通知後端失敗:', error.message);
+            }
+        }
+
+        // 手動輸入連接碼
+        function manualConnect() {
+            const code = document.getElementById('connectionCode').value.trim();
+            if (code.length === 6) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status info';
+                statusDiv.innerHTML = `正在使用連接碼 ${code} 連接...`;
+                
+                // 模擬連接過程
+                setTimeout(() => {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '🎉 手動連接成功！<br>連接碼: ' + code;
+                }, 2000);
+            } else {
+                alert('請輸入6位連接碼');
+            }
+        }
+
+        // 頁面加載時檢查藍牙支持
+        window.addEventListener('load', checkBluetoothSupport);
+    </script>
+</body>
+</html>

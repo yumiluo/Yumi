@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  vr-system:
+    build: .
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - API_PORT=3001
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - vr-network
+
+  # 可選：添加數據庫服務
+  # postgres:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_DB: vr_system
+  #     POSTGRES_USER: vr_user
+  #     POSTGRES_PASSWORD: vr_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - vr-network
+
+  # 可選：添加Redis緩存
+  # redis:
+  #   image: redis:7-alpine
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - vr-network
+
+networks:
+  vr-network:
+    driver: bridge
+
+volumes:
+  # postgres_data:
+  # redis_data:

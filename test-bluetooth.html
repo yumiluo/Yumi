@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>藍牙功能測試</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .status.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .device-list {
+            margin: 20px 0;
+        }
+        .device-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .device-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .device-info {
+            color: #666;
+            font-size: 14px;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔵 藍牙功能測試頁面</h1>
+        
+        <div class="status info">
+            <strong>測試說明：</strong>
+            <ul>
+                <li>此頁面用於測試Web Bluetooth API功能</li>
+                <li>僅在Chrome瀏覽器（Android/Desktop）中支持</li>
+                <li>需要HTTPS環境或localhost</li>
+                <li>設備必須開啟藍牙且處於可發現狀態</li>
+            </ul>
+        </div>
+
+        <div id="bluetoothStatus" class="status info">
+            正在檢查藍牙支持...
+        </div>
+
+        <div class="controls">
+            <button id="scanBtn" onclick="startBluetoothScan()" disabled>
+                開始藍牙掃描
+            </button>
+            <button id="stopBtn" onclick="stopBluetoothScan()" disabled>
+                停止掃描
+            </button>
+            <button onclick="clearLog()">
+                清除日誌
+            </button>
+        </div>
+
+        <div id="deviceList" class="device-list">
+            <h3>發現的設備</h3>
+            <div id="devices"></div>
+        </div>
+
+        <div class="log">
+            <h3>操作日誌</h3>
+            <div id="logContent"></div>
+        </div>
+    </div>
+
+    <script>
+        let isScanning = false;
+        let discoveredDevices = [];
+
+        // 檢查藍牙支持
+        async function checkBluetoothSupport() {
+            const statusDiv = document.getElementById('bluetoothStatus');
+            const scanBtn = document.getElementById('scanBtn');
+            
+            if (!navigator.bluetooth) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `
+                    <strong>❌ 藍牙不支持</strong><br>
+                    您的瀏覽器不支持Web Bluetooth API。<br>
+                    請使用Chrome瀏覽器（Android或Desktop）。
+                `;
+                return false;
+            }
+
+            try {
+                const available = await navigator.bluetooth.getAvailability();
+                if (available) {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = `
+                        <strong>✅ 藍牙可用</strong><br>
+                        Web Bluetooth API已準備就緒，可以開始掃描設備。
+                    `;
+                    scanBtn.disabled = false;
+                    return true;
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = `
+                        <strong>❌ 藍牙不可用</strong><br>
+                        請確保設備已開啟藍牙功能。
+                    `;
+                    return false;
+                }
+            } catch (error) {
+                log(`檢查藍牙可用性失敗: ${error.message}`, 'error');
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `
+                    <strong>❌ 藍牙檢查失敗</strong><br>
+                    無法檢查藍牙狀態，請確保已授予權限。
+                `;
+                return false;
+            }
+        }
+
+        // 開始藍牙掃描
+        async function startBluetoothScan() {
+            if (isScanning) {
+                log('掃描已進行中...', 'info');
+                return;
+            }
+
+            isScanning = true;
+            document.getElementById('scanBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            
+            log('開始藍牙掃描...', 'info');
+            discoveredDevices = [];
+            updateDeviceList();
+
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { services: ['generic_access'] }
+                    ],
+                    optionalServices: [
+                        'battery_service',
+                        'device_information',
+                        'generic_attribute',
+                        'human_interface_device'
+                    ]
+                });
+
+                if (device) {
+                    log(`發現設備: ${device.name || '未知設備'} (ID: ${device.id})`, 'success');
+                    
+                    const deviceInfo = {
+                        id: device.id,
+                        name: device.name || '未知設備',
+                        address: device.id,
+                        rssi: -50,
+                        isVRDevice: isVRDevice(device.name || ''),
+                        isConnected: false
+                    };
+
+                    discoveredDevices.push(deviceInfo);
+                    updateDeviceList();
+
+                    // 嘗試連接設備
+                    await connectToDevice(deviceInfo);
+                }
+            } catch (error) {
+                log(`藍牙掃描失敗: ${error.message}`, 'error');
+                
+                if (error.name === 'NotFoundError') {
+                    log('未找到藍牙設備。請確保設備已開啟藍牙且處於可發現狀態。', 'error');
+                } else if (error.name === 'NotAllowedError') {
+                    log('藍牙權限被拒絕。請允許瀏覽器訪問藍牙功能。', 'error');
+                } else if (error.name === 'NetworkError') {
+                    log('藍牙連接失敗。請檢查設備是否在範圍內。', 'error');
+                } else if (error.name === 'InvalidStateError') {
+                    log('藍牙掃描已進行中。請等待當前掃描完成。', 'error');
+                }
+            } finally {
+                isScanning = false;
+                document.getElementById('scanBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                log('藍牙掃描完成', 'info');
+            }
+        }
+
+        // 停止掃描
+        function stopBluetoothScan() {
+            isScanning = false;
+            document.getElementById('scanBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            log('掃描已停止', 'info');
+        }
+
+        // 連接設備
+        async function connectToDevice(deviceInfo) {
+            try {
+                log(`正在連接設備: ${deviceInfo.name}...`, 'info');
+                
+                // 模擬連接過程
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                deviceInfo.isConnected = true;
+                updateDeviceList();
+                
+                log(`設備 ${deviceInfo.name} 連接成功！`, 'success');
+            } catch (error) {
+                log(`連接設備失敗: ${error.message}`, 'error');
+            }
+        }
+
+        // 判斷是否為VR設備
+        function isVRDevice(deviceName) {
+            const vrKeywords = [
+                'quest', 'vive', 'pico', 'oculus', 'valve', 'index', 'varjo',
+                'vr', 'virtual', 'reality', 'headset', 'hmd'
+            ];
+            return vrKeywords.some(keyword => 
+                deviceName.toLowerCase().includes(keyword)
+            );
+        }
+
+        // 更新設備列表
+        function updateDeviceList() {
+            const devicesDiv = document.getElementById('devices');
+            
+            if (discoveredDevices.length === 0) {
+                devicesDiv.innerHTML = '<p>暫未發現設備</p>';
+                return;
+            }
+
+            devicesDiv.innerHTML = discoveredDevices.map(device => `
+                <div class="device-item">
+                    <div class="device-name">
+                        ${device.isVRDevice ? '🎮' : '📱'} ${device.name}
+                    </div>
+                    <div class="device-info">
+                        ID: ${device.id.substring(0, 8)}...<br>
+                        類型: ${device.isVRDevice ? 'VR設備' : '移動設備'}<br>
+                        狀態: <span style="color: ${device.isConnected ? 'green' : 'orange'}">
+                            ${device.isConnected ? '已連接' : '未連接'}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 記錄日誌
+        function log(message, type = 'info') {
+            const logContent = document.getElementById('logContent');
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'blue';
+            
+            logContent.innerHTML += `
+                <div style="color: ${color}; margin: 5px 0;">
+                    [${timestamp}] ${message}
+                </div>
+            `;
+            
+            logContent.scrollTop = logContent.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        // 清除日誌
+        function clearLog() {
+            document.getElementById('logContent').innerHTML = '';
+        }
+
+        // 頁面加載時檢查藍牙支持
+        window.addEventListener('load', checkBluetoothSupport);
+    </script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{"status":"healthy","timestamp":"2025-08-25T02:49:05.841Z","uptime":3.674615879,"memory":{"rss":67878912,"heapTotal":26017792,"heapUsed":19175392,"external":3696412,"arrayBuffers":79434},"responseTime":6,"services":{"database":"connected","websocket":"active","fileSystem":"accessible"}}

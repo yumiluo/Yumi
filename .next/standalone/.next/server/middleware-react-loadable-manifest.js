@@ -1,0 +1,1 @@
+self.__REACT_LOADABLE_MANIFEST='{"app/page.tsx -> socket.io-client":{"id":8680,"files":["static/chunks/680-ed790778bd65a896.js"]}}';

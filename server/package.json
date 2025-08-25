@@ -1,0 +1,35 @@
+{
+  "name": "vr-socket-server",
+  "version": "1.0.0",
+  "description": "VR多設備視頻播放Socket.io後端服務器",
+  "main": "vr-server.js",
+  "scripts": {
+    "start": "node vr-server.js",
+    "dev": "nodemon vr-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "vr",
+    "socket.io",
+    "video-sync",
+    "multi-device",
+    "websocket"
+  ],
+  "author": "VR Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5",
+    "bcrypt": "^5.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "validator": "^13.11.0",
+    "@supabase/supabase-js": "^2.38.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

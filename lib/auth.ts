@@ -1,3 +1,123 @@
+import jwt from 'jsonwebtoken';
+import { IUser } from './models/User';
+
+// JWT密鑰（在生產環境中應該使用環境變量）
+const JWT_SECRET = process.env.JWT_SECRET || 'vr-travel-secret-key-2024';
+
+// JWT配置
+const JWT_CONFIG = {
+  expiresIn: '24h', // 24小時過期
+  issuer: 'vr-travel-system',
+  audience: 'vr-travel-users'
+};
+
+// 生成JWT token
+export function generateToken(user: IUser): string {
+  const payload = {
+    userId: user._id,
+    email: user.email,
+    role: user.role
+  };
+
+  return jwt.sign(payload, JWT_SECRET, JWT_CONFIG);
+}
+
+// 驗證JWT token
+export function verifyToken(token: string): any {
+  try {
+    return jwt.verify(token, JWT_SECRET, JWT_CONFIG);
+  } catch (error) {
+    throw new Error('無效的token');
+  }
+}
+
+// 從請求頭中提取token
+export function extractTokenFromHeader(authHeader: string | undefined): string | null {
+  if (!authHeader) return null;
+  
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  
+  return null;
+}
+
+// 中間件：驗證JWT token
+export function authenticateToken(req: any, res: any, next: any) {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = extractTokenFromHeader(authHeader);
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: '缺少認證token'
+      });
+    }
+
+    const decoded = verifyToken(token);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: '無效的token'
+    });
+  }
+}
+
+// 中間件：檢查用戶角色
+export function requireRole(role: 'controller' | 'user') {
+  return function(req: any, res: any, next: any) {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: '未認證'
+      });
+    }
+
+    if (req.user.role !== role && req.user.role !== 'controller') {
+      return res.status(403).json({
+        success: false,
+        message: '權限不足'
+      });
+    }
+
+    next();
+  };
+}
+
+// 檢查token是否過期
+export function isTokenExpired(token: string): boolean {
+  try {
+    const decoded = jwt.decode(token) as any;
+    if (!decoded || !decoded.exp) return true;
+    
+    const currentTime = Math.floor(Date.now() / 1000);
+    return decoded.exp < currentTime;
+  } catch (error) {
+    return true;
+  }
+}
+
+// 刷新token（如果需要）
+export function refreshToken(oldToken: string): string | null {
+  try {
+    const decoded = verifyToken(oldToken) as any;
+    
+    // 創建新的payload
+    const payload = {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role
+    };
+
+    return jwt.sign(payload, JWT_SECRET, JWT_CONFIG);
+  } catch (error) {
+    return null;
+  }
+}
+
 interface User {
   id: string
   username: string

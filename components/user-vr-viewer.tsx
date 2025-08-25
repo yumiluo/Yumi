@@ -1,614 +1,491 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from 'react'
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import {
-  Play,
-  Pause,
-  Volume2,
-  VolumeX,
-  Maximize,
-  Minimize,
-  RotateCcw,
-  Settings,
-  Wifi,
-  WifiOff,
-  Signal,
-  Eye,
-  EyeOff,
-  AlertTriangle,
+import { 
+  Play, 
+  Pause, 
+  Square, 
+  QrCode, 
+  Smartphone, 
   CheckCircle,
+  AlertCircle,
   Loader2,
-  RefreshCw,
+  Monitor,
+  Wifi,
+  X
 } from "lucide-react"
-import { translations, type Language } from "@/lib/i18n"
-import { WebSocketSyncProtocol } from "@/lib/websocket-sync-protocol"
-import { YouTubeVRIntegration } from "@/lib/youtube-vr-integration"
+import { io, Socket } from 'socket.io-client'
+// 聲明YouTube IFrame API
+declare global {
+  interface Window {
+    YT: any
+    onYouTubeIframeAPIReady: () => void
+  }
+}
 
 interface UserVRViewerProps {
-  language: Language
-  deviceId: string
-  sessionId: string
-  serverUrl: string
+  onClose?: () => void
 }
 
-interface ViewerState {
-  isConnected: boolean
+interface VideoState {
   isPlaying: boolean
-  isPaused: boolean
-  isBuffering: boolean
-  isVRMode: boolean
-  isFullscreen: boolean
-  isMuted: boolean
-  volume: number
   currentTime: number
-  duration: number
-  networkLatency: number
-  bufferHealth: number
-  syncOffset: number
-  currentVideo: string | null
+  videoUrl: string | null
+  videoId: string | null
 }
 
-interface NetworkStatus {
-  quality: "excellent" | "good" | "fair" | "poor"
-  latency: number
-  bandwidth: number
-  stability: number
-}
-
-export function UserVRViewer({ language, deviceId, sessionId, serverUrl }: UserVRViewerProps) {
-  const [viewerState, setViewerState] = useState<ViewerState>({
-    isConnected: false,
+export function UserVRViewer({ onClose }: UserVRViewerProps) {
+  const [socket, setSocket] = useState<Socket | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
+  const [sessionCode, setSessionCode] = useState('')
+  const [isJoining, setIsJoining] = useState(false)
+  const [error, setError] = useState<string>('')
+  const [success, setSuccess] = useState<string>('')
+  const [videoState, setVideoState] = useState<VideoState>({
     isPlaying: false,
-    isPaused: false,
-    isBuffering: false,
-    isVRMode: false,
-    isFullscreen: false,
-    isMuted: false,
-    volume: 80,
     currentTime: 0,
-    duration: 0,
-    networkLatency: 0,
-    bufferHealth: 100,
-    syncOffset: 0,
-    currentVideo: null,
+    videoUrl: null,
+    videoId: null
   })
-
-  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>({
-    quality: "good",
-    latency: 50,
-    bandwidth: 10,
-    stability: 95,
+  const [deviceInfo, setDeviceInfo] = useState({
+    id: '',
+    name: '',
+    type: '',
+    model: ''
   })
+  
+  const videoRef = useRef<HTMLVideoElement>(null)
 
-  const [showControls, setShowControls] = useState(true)
-  const [showNetworkInfo, setShowNetworkInfo] = useState(false)
-  const [isInitializing, setIsInitializing] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [syncWarning, setSyncWarning] = useState<string | null>(null)
-
-  const videoContainerRef = useRef<HTMLDivElement>(null)
-  const syncProtocolRef = useRef<WebSocketSyncProtocol | null>(null)
-  const youtubePlayerRef = useRef<YouTubeVRIntegration | null>(null)
-  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-  const t = translations[language]
-
-  // 初始化連接
+  // 初始化設備信息
   useEffect(() => {
-    initializeConnection()
+    // 簡單的設備檢測（不使用ua-parser-js）
+    const userAgent = navigator.userAgent
+    let deviceType = 'mobile'
+    let deviceModel = '未知設備'
+    
+    if (userAgent.includes('iPhone')) {
+      deviceModel = 'iPhone'
+      if (userAgent.includes('OS 17')) deviceModel += ' 17'
+      else if (userAgent.includes('OS 16')) deviceModel += ' 16'
+      else if (userAgent.includes('OS 15')) deviceModel += ' 15'
+    } else if (userAgent.includes('Android')) {
+      if (userAgent.includes('Samsung')) {
+        deviceModel = 'Samsung Galaxy'
+      } else if (userAgent.includes('Xiaomi')) {
+        deviceModel = 'Xiaomi'
+      } else if (userAgent.includes('Huawei')) {
+        deviceModel = 'Huawei'
+      } else {
+        deviceModel = 'Android Device'
+      }
+    } else if (userAgent.includes('iPad')) {
+      deviceType = 'tablet'
+      deviceModel = 'iPad'
+    } else if (userAgent.includes('Mac')) {
+      deviceType = 'desktop'
+      deviceModel = 'Mac'
+    } else if (userAgent.includes('Windows')) {
+      deviceType = 'desktop'
+      deviceModel = 'Windows PC'
+    }
+    
+    // 生成唯一設備ID
+    const deviceId = 'DEVICE-' + Math.random().toString(36).substr(2, 8).toUpperCase()
+    
+    setDeviceInfo({
+      id: deviceId,
+      name: `${deviceType} ${deviceId}`,
+      type: deviceType,
+      model: deviceModel
+    })
+    
+    console.log('設備信息:', {
+      id: deviceId,
+      name: `${deviceType} ${deviceId}`,
+      type: deviceType,
+      model: deviceModel,
+      userAgent: navigator.userAgent
+    })
+  }, [])
+
+  // 初始化Socket.io連接
+  useEffect(() => {
+    const newSocket = io('http://localhost:5001', {
+      transports: ['polling', 'websocket'],
+      timeout: 10000,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      forceNew: true
+    })
+    
+    newSocket.on('connect', () => {
+      console.log('已連接到Socket.io服務器')
+      setIsConnected(true)
+      setError('')
+    })
+    
+    newSocket.on('disconnect', () => {
+      console.log('與Socket.io服務器斷開連接')
+      setIsConnected(false)
+      setError('與服務器斷開連接')
+    })
+    
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket.io連接錯誤:', error)
+      setError(`連接錯誤: ${error.message}`)
+      setIsConnected(false)
+    })
+    
+    // 監聽會話狀態更新
+    newSocket.on('session-state', (data) => {
+      console.log('收到會話狀態:', data)
+      setSuccess(`已加入會話 ${data.sessionCode}`)
+    })
+    
+      // 監聽視頻同步事件
+  newSocket.on('video-sync', (data) => {
+    console.log('收到視頻同步:', data)
+    
+    const { type, videoId, videoUrl, startTime, currentTime, timestamp } = data
+    const serverTimestamp = timestamp || Date.now()
+    const clientTimestamp = Date.now()
+    const networkDelay = clientTimestamp - serverTimestamp
+    
+    console.log(`⏱️ 網絡延遲: ${networkDelay}ms`)
+    
+    switch (type) {
+      case 'play':
+        setVideoState(prev => ({
+          ...prev,
+          isPlaying: true,
+          videoUrl: data.videoUrl,
+          videoId: data.videoId,
+          currentTime: data.startTime || 0
+        }))
+        
+        if (videoRef.current) {
+          const adjustedTime = Math.max(0, (data.startTime || 0) + (networkDelay / 1000))
+          videoRef.current.currentTime = adjustedTime
+          videoRef.current.play().catch(err => {
+            console.error('播放視頻失敗:', err)
+            setError('播放視頻失敗')
+          })
+        }
+        break
+        
+      case 'pause':
+        setVideoState(prev => ({ ...prev, isPlaying: false }))
+        if (videoRef.current) {
+          videoRef.current.pause()
+        }
+        break
+        
+      case 'stop':
+        setVideoState(prev => ({
+          ...prev,
+          isPlaying: false,
+          currentTime: 0,
+          videoUrl: null,
+          videoId: null
+        }))
+        if (videoRef.current) {
+          videoRef.current.pause()
+          videoRef.current.currentTime = 0
+        }
+        break
+        
+      case 'time-sync':
+        if (Math.abs(currentTime - videoState.currentTime) > 1) {
+          const adjustedTime = Math.max(0, currentTime + (networkDelay / 1000))
+          setVideoState(prev => ({ ...prev, currentTime: adjustedTime }))
+          if (videoRef.current) {
+            videoRef.current.currentTime = adjustedTime
+          }
+          console.log(`🔄 時間同步: ${adjustedTime}s`)
+        }
+        break
+    }
+  })
+    
+    // 監聽錯誤事件
+    newSocket.on('error', (data) => {
+      console.error('服務器錯誤:', data)
+      setError(data.message || '服務器錯誤')
+    })
+    
+    setSocket(newSocket)
+    
     return () => {
-      cleanup()
+      newSocket.close()
     }
   }, [])
 
-  // 自動隱藏控制項
-  useEffect(() => {
-    if (showControls && viewerState.isPlaying) {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current)
-      }
-
-      controlsTimeoutRef.current = setTimeout(() => {
-        setShowControls(false)
-      }, 3000)
-    }
-
-    return () => {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current)
-      }
-    }
-  }, [showControls, viewerState.isPlaying])
-
-  // 網路狀態監控
-  useEffect(() => {
-    const updateNetworkStatus = () => {
-      const connection =
-        (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection
-
-      if (connection) {
-        let quality: NetworkStatus["quality"] = "good"
-
-        if (connection.effectiveType === "4g" && connection.downlink > 10) {
-          quality = "excellent"
-        } else if (connection.effectiveType === "4g" || connection.downlink > 5) {
-          quality = "good"
-        } else if (connection.effectiveType === "3g" || connection.downlink > 1) {
-          quality = "fair"
-        } else {
-          quality = "poor"
-        }
-
-        setNetworkStatus({
-          quality,
-          latency: connection.rtt || viewerState.networkLatency,
-          bandwidth: connection.downlink || 0,
-          stability: Math.max(0, 100 - (connection.rtt || 0) / 10),
-        })
-      }
-    }
-
-    updateNetworkStatus()
-    const interval = setInterval(updateNetworkStatus, 5000)
-    return () => clearInterval(interval)
-  }, [viewerState.networkLatency])
-
-  const initializeConnection = async () => {
+  // 加入會話
+  const joinSession = async () => {
+    if (!socket || !sessionCode.trim()) return
+    
+    setIsJoining(true)
+    setError('')
+    setSuccess('')
+    
     try {
-      setIsInitializing(true)
-      setError(null)
-
-      // 初始化WebSocket同步協議
-      syncProtocolRef.current = new WebSocketSyncProtocol(deviceId, sessionId)
-      await syncProtocolRef.current.connect(serverUrl)
-
-      // 初始化YouTube VR播放器
-      youtubePlayerRef.current = new YouTubeVRIntegration("", syncProtocolRef.current)
-
-      if (videoContainerRef.current) {
-        await youtubePlayerRef.current.createVRPlayer("vr-player-container", {
-          apiKey: "",
-          quality: "hd1080",
-          vrMode: "360",
-          autoplay: false,
-          controls: false,
-          enablejsapi: true,
-        })
-      }
-
-      // 設置消息處理器
-      setupMessageHandlers()
-
-      setViewerState((prev) => ({ ...prev, isConnected: true }))
-      setIsInitializing(false)
-
-      console.log("VR觀看器初始化完成")
-    } catch (error) {
-      console.error("初始化失敗:", error)
-      setError(language === "zh" ? "連接失敗，請重試" : "Connection failed, please retry")
-      setIsInitializing(false)
+      console.log('嘗試加入會話:', sessionCode)
+      
+      socket.emit('join-session', {
+        joinCode: sessionCode.trim(),
+        deviceId: deviceInfo.id,
+        deviceName: deviceInfo.name,
+        deviceType: deviceInfo.type,
+        deviceModel: deviceInfo.model,
+        connectionMethod: 'network',
+        timestamp: Date.now()
+      })
+      
+      setSuccess('正在加入會話...')
+      
+    } catch (err: any) {
+      setError('加入會話失敗: ' + err.message)
+    } finally {
+      setIsJoining(false)
     }
   }
 
-  const setupMessageHandlers = () => {
-    if (!syncProtocolRef.current) return
-
-    // 這裡應該設置實際的消息處理器
-    // 由於WebSocketSyncProtocol類的限制，我們模擬消息處理
-
-    // 模擬接收播放命令
-    const simulatePlayCommand = (videoUrl: string, startTime: number) => {
-      setViewerState((prev) => ({
-        ...prev,
-        isPlaying: true,
-        isPaused: false,
-        currentVideo: videoUrl,
-        currentTime: startTime,
-      }))
-
-      if (youtubePlayerRef.current) {
-        youtubePlayerRef.current.syncPlay(startTime, Date.now())
-      }
-    }
-
-    // 模擬接收暫停命令
-    const simulatePauseCommand = () => {
-      setViewerState((prev) => ({
-        ...prev,
-        isPlaying: false,
-        isPaused: true,
-      }))
-
-      if (youtubePlayerRef.current) {
-        youtubePlayerRef.current.syncPause(Date.now())
-      }
-    }
-
-    // 模擬同步檢查
-    setInterval(() => {
-      if (viewerState.isPlaying) {
-        const syncDrift = Math.random() * 400 - 200 // -200ms到+200ms
-
-        if (Math.abs(syncDrift) > 200) {
-          setSyncWarning(language === "zh" ? "同步偏差過大，正在校正..." : "Sync drift detected, correcting...")
-
-          setTimeout(() => {
-            setSyncWarning(null)
-          }, 2000)
-        }
-
-        setViewerState((prev) => ({
-          ...prev,
-          syncOffset: syncDrift,
-          networkLatency: 30 + Math.random() * 40,
-          bufferHealth: Math.max(0, 100 - Math.random() * 20),
-        }))
-      }
-    }, 1000)
-  }
-
-  const cleanup = () => {
-    if (syncProtocolRef.current) {
-      // 清理WebSocket連接
-    }
-
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current)
+  // 處理視頻時間更新
+  const handleTimeUpdate = () => {
+    if (videoRef.current && socket && sessionCode) {
+      const currentTime = videoRef.current.currentTime
+      setVideoState(prev => ({ ...prev, currentTime }))
+      
+      // 發送時間同步到服務器
+      socket.emit('sync-time', {
+        sessionCode: sessionCode,
+        currentTime,
+        timestamp: Date.now()
+      })
     }
   }
 
-  const toggleVRMode = () => {
-    setViewerState((prev) => ({ ...prev, isVRMode: !prev.isVRMode }))
-
-    if (youtubePlayerRef.current) {
-      // 切換VR模式
+  // 處理視頻播放
+  const handlePlay = () => {
+    if (videoRef.current) {
+      videoRef.current.play().catch(err => {
+        console.error('播放失敗:', err)
+        setError('播放失敗')
+      })
     }
   }
 
-  const toggleFullscreen = async () => {
-    if (!videoContainerRef.current) return
-
-    try {
-      if (!viewerState.isFullscreen) {
-        if (videoContainerRef.current.requestFullscreen) {
-          await videoContainerRef.current.requestFullscreen()
-        }
-        setViewerState((prev) => ({ ...prev, isFullscreen: true }))
-      } else {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen()
-        }
-        setViewerState((prev) => ({ ...prev, isFullscreen: false }))
-      }
-    } catch (error) {
-      console.error("全螢幕切換失敗:", error)
+  // 處理視頻暫停
+  const handlePause = () => {
+    if (videoRef.current) {
+      videoRef.current.pause()
     }
   }
 
-  const toggleMute = () => {
-    setViewerState((prev) => ({ ...prev, isMuted: !prev.isMuted }))
-  }
-
-  const handleVolumeChange = (newVolume: number) => {
-    setViewerState((prev) => ({ ...prev, volume: newVolume, isMuted: newVolume === 0 }))
-  }
-
-  const recenterView = () => {
-    if (youtubePlayerRef.current) {
-      // 重新定位VR視角
+  // 處理視頻停止
+  const handleStop = () => {
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
     }
-  }
-
-  const showControlsTemporarily = () => {
-    setShowControls(true)
-  }
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }
-
-  const getNetworkStatusColor = (quality: NetworkStatus["quality"]) => {
-    switch (quality) {
-      case "excellent":
-        return "text-green-500"
-      case "good":
-        return "text-blue-500"
-      case "fair":
-        return "text-yellow-500"
-      case "poor":
-        return "text-red-500"
-      default:
-        return "text-gray-500"
-    }
-  }
-
-  const getNetworkStatusIcon = (quality: NetworkStatus["quality"]) => {
-    switch (quality) {
-      case "excellent":
-        return <Signal className="w-4 h-4" />
-      case "good":
-        return <Wifi className="w-4 h-4" />
-      case "fair":
-        return <Wifi className="w-4 h-4" />
-      case "poor":
-        return <WifiOff className="w-4 h-4" />
-      default:
-        return <WifiOff className="w-4 h-4" />
-    }
-  }
-
-  if (isInitializing) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-center text-white space-y-4">
-          <Loader2 className="w-12 h-12 mx-auto animate-spin" />
-          <h2 className="text-xl font-medium">
-            {language === "zh" ? "正在初始化VR播放器..." : "Initializing VR Player..."}
-          </h2>
-          <p className="text-gray-400">
-            {language === "zh" ? "請稍候，正在建立連接" : "Please wait, establishing connection"}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-center text-white space-y-4 max-w-md">
-          <AlertTriangle className="w-16 h-16 mx-auto text-red-500" />
-          <h2 className="text-xl font-medium">{language === "zh" ? "連接錯誤" : "Connection Error"}</h2>
-          <p className="text-gray-400">{error}</p>
-          <Button onClick={initializeConnection} variant="outline">
-            <RefreshCw className="w-4 h-4 mr-2" />
-            {language === "zh" ? "重新連接" : "Reconnect"}
-          </Button>
-        </div>
-      </div>
-    )
   }
 
   return (
-    <div className="relative min-h-screen bg-black overflow-hidden">
-      {/* 主要視頻容器 */}
-      <div
-        ref={videoContainerRef}
-        className={`relative w-full h-screen ${viewerState.isVRMode ? "vr-container" : ""}`}
-        onClick={showControlsTemporarily}
-        onMouseMove={showControlsTemporarily}
-      >
-        {/* YouTube播放器容器 */}
-        <div id="vr-player-container" className="w-full h-full" />
-
-        {/* 連接狀態指示器 */}
-        <div className="absolute top-4 left-4 z-50">
-          <div className="flex items-center gap-2 bg-black/50 backdrop-blur-sm rounded-lg px-3 py-2">
-            {viewerState.isConnected ? (
-              <CheckCircle className="w-4 h-4 text-green-500" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 text-red-500" />
-            )}
-            <span className="text-white text-sm">
-              {viewerState.isConnected
-                ? language === "zh"
-                  ? "已連接"
-                  : "Connected"
-                : language === "zh"
-                  ? "未連接"
-                  : "Disconnected"}
-            </span>
-          </div>
-        </div>
-
-        {/* 網路狀態指示器 */}
-        <div className="absolute top-4 right-4 z-50">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="bg-black/50 backdrop-blur-sm text-white hover:bg-black/70"
-            onClick={() => setShowNetworkInfo(!showNetworkInfo)}
-          >
-            <div className={getNetworkStatusColor(networkStatus.quality)}>
-              {getNetworkStatusIcon(networkStatus.quality)}
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* 頂部導航 */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <Smartphone className="h-8 w-8 text-green-600" />
+              <h1 className="text-xl font-semibold text-gray-900">VR視頻觀看器</h1>
+              <Badge variant="secondary" className="hidden md:inline-flex items-center">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                用戶模式
+              </Badge>
             </div>
-            <span className="ml-2 text-sm">{viewerState.networkLatency}ms</span>
-          </Button>
-        </div>
-
-        {/* 同步警告 */}
-        {syncWarning && (
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50">
-            <Alert className="bg-yellow-500/90 border-yellow-600 text-white">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>{syncWarning}</AlertDescription>
-            </Alert>
-          </div>
-        )}
-
-        {/* 緩衝指示器 */}
-        {viewerState.isBuffering && (
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50">
-            <div className="bg-black/70 backdrop-blur-sm rounded-lg p-4 text-white text-center">
-              <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin" />
-              <p>{language === "zh" ? "緩衝中..." : "Buffering..."}</p>
+            <div className="flex items-center space-x-2">
+              {onClose && (
+                <Button variant="outline" size="sm" onClick={onClose}>
+                  <X className="h-4 w-4" />
+                  關閉
+                </Button>
+              )}
             </div>
           </div>
-        )}
+        </div>
+      </header>
 
-        {/* 播放控制界面 */}
-        {showControls && (
-          <div className="absolute bottom-0 left-0 right-0 z-40">
-            <div className="bg-gradient-to-t from-black/80 to-transparent p-6">
-              {/* 進度條 */}
-              <div className="mb-4">
-                <Progress value={(viewerState.currentTime / viewerState.duration) * 100} className="h-2 bg-white/20" />
-                <div className="flex justify-between text-white text-sm mt-1">
-                  <span>{formatTime(viewerState.currentTime)}</span>
-                  <span>{formatTime(viewerState.duration)}</span>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* 連接控制 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Wifi className="h-5 w-5" />
+                會話連接
+              </CardTitle>
+              <CardDescription>
+                連接到控制器會話以同步觀看VR視頻
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* 連接狀態 */}
+              <div className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm">
+                  {isConnected ? '已連接到服務器' : '未連接'}
+                </span>
+              </div>
+              
+              {/* 設備信息 */}
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-2">設備信息</h4>
+                <div className="text-sm text-gray-600 space-y-1">
+                  <p><strong>設備ID:</strong> {deviceInfo.id}</p>
+                  <p><strong>設備名稱:</strong> {deviceInfo.name}</p>
+                  <p><strong>設備類型:</strong> {deviceInfo.type}</p>
+                  <p><strong>設備型號:</strong> {deviceInfo.model}</p>
                 </div>
               </div>
-
-              {/* 控制按鈕 */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  {/* 播放/暫停按鈕 */}
+              
+              {/* 會話代碼輸入 */}
+              <div className="space-y-2">
+                <label htmlFor="sessionCode" className="text-sm font-medium text-gray-700">
+                  會話代碼
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    id="sessionCode"
+                    placeholder="輸入會話代碼，如：SESSION-ABC123"
+                    value={sessionCode}
+                    onChange={(e) => setSessionCode(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && joinSession()}
+                  />
                   <Button
-                    variant="ghost"
-                    size="lg"
-                    className="text-white hover:bg-white/20"
-                    disabled={!viewerState.isConnected}
+                    onClick={joinSession}
+                    disabled={!isConnected || isJoining || !sessionCode.trim()}
+                    className="bg-green-600 hover:bg-green-700"
                   >
-                    {viewerState.isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+                    {isJoining ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle className="mr-2 h-4 w-4" />
+                    )}
+                    加入會話
                   </Button>
+                </div>
+              </div>
+              
+              {/* 連接說明 */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <h4 className="font-medium text-blue-900 mb-2">連接說明</h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• 確保與控制器在同一Wi-Fi網絡</li>
+                  <li>• 從控制器獲取會話代碼</li>
+                  <li>• 輸入會話代碼並點擊"加入會話"</li>
+                  <li>• 連接成功後將自動同步視頻播放</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
 
-                  {/* 音量控制 */}
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="sm" className="text-white hover:bg-white/20" onClick={toggleMute}>
-                      {viewerState.isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          {/* 視頻播放器 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Monitor className="h-5 w-5" />
+                視頻播放器
+              </CardTitle>
+              <CardDescription>
+                {videoState.videoUrl ? '正在播放同步視頻' : '等待控制器發送視頻'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {videoState.videoUrl ? (
+                <>
+                  {/* 視頻播放器 */}
+                  <div className="relative">
+                    <video
+                      ref={videoRef}
+                      className="w-full h-64 object-cover rounded-lg"
+                      controls
+                      onTimeUpdate={handleTimeUpdate}
+                      src={videoState.videoUrl}
+                    />
+                  </div>
+                  
+                  {/* 播放控制 */}
+                  <div className="flex justify-center gap-2">
+                    <Button
+                      onClick={handlePlay}
+                      disabled={videoState.isPlaying}
+                      size="sm"
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      播放
                     </Button>
-                    <div className="w-20">
-                      <Progress value={viewerState.isMuted ? 0 : viewerState.volume} className="h-1 bg-white/20" />
+                    <Button
+                      onClick={handlePause}
+                      disabled={!videoState.isPlaying}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Pause className="mr-2 h-4 w-4" />
+                      暫停
+                    </Button>
+                    <Button
+                      onClick={handleStop}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Square className="mr-2 h-4 w-4" />
+                      停止
+                    </Button>
+                  </div>
+                  
+                  {/* 播放狀態 */}
+                  <div className="text-center">
+                    <Badge variant="default" className="text-sm">
+                      {videoState.isPlaying ? '正在播放中' : '已暫停'} - 與控制器同步
+                    </Badge>
+                    <div className="text-xs text-gray-500 mt-1">
+                      當前時間: {Math.floor(videoState.currentTime / 60)}:{(videoState.currentTime % 60).toFixed(0).padStart(2, '0')}
                     </div>
                   </div>
-
-                  {/* 同步狀態 */}
-                  <div className="flex items-center gap-2 text-white text-sm">
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        Math.abs(viewerState.syncOffset) < 100
-                          ? "bg-green-500"
-                          : Math.abs(viewerState.syncOffset) < 200
-                            ? "bg-yellow-500"
-                            : "bg-red-500"
-                      }`}
-                    />
-                    <span>{Math.abs(viewerState.syncOffset).toFixed(0)}ms</span>
-                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <Monitor className="mx-auto h-16 w-16 mb-4 opacity-50" />
+                  <h3 className="text-lg font-semibold mb-2">等待視頻</h3>
+                  <p className="text-sm">請先加入會話，控制器將發送視頻進行同步播放</p>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-                <div className="flex items-center gap-2">
-                  {/* VR模式切換 */}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={`text-white hover:bg-white/20 ${viewerState.isVRMode ? "bg-white/20" : ""}`}
-                    onClick={toggleVRMode}
-                  >
-                    {viewerState.isVRMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </Button>
-
-                  {/* 重新定位 */}
-                  {viewerState.isVRMode && (
-                    <Button variant="ghost" size="sm" className="text-white hover:bg-white/20" onClick={recenterView}>
-                      <RotateCcw className="w-5 h-5" />
-                    </Button>
-                  )}
-
-                  {/* 設定 */}
-                  <Button variant="ghost" size="sm" className="text-white hover:bg-white/20">
-                    <Settings className="w-5 h-5" />
-                  </Button>
-
-                  {/* 全螢幕 */}
-                  <Button variant="ghost" size="sm" className="text-white hover:bg-white/20" onClick={toggleFullscreen}>
-                    {viewerState.isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* 錯誤和成功提示 */}
+        {error && (
+          <Alert variant="destructive" className="mt-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
-
-        {/* VR模式提示 */}
-        {viewerState.isVRMode && (
-          <div className="absolute top-1/2 left-4 transform -translate-y-1/2 z-30">
-            <div className="bg-black/50 backdrop-blur-sm rounded-lg p-3 text-white text-sm max-w-48">
-              <p className="mb-2">{language === "zh" ? "VR模式已啟用" : "VR Mode Active"}</p>
-              <p className="text-xs text-gray-300">
-                {language === "zh" ? "使用手機陀螺儀或拖拽來控制視角" : "Use device gyroscope or drag to control view"}
-              </p>
-            </div>
-          </div>
+        
+        {success && (
+          <Alert className="mt-6">
+            <CheckCircle className="h-4 w-4" />
+            <AlertDescription>{success}</AlertDescription>
+          </Alert>
         )}
-      </div>
-
-      {/* 網路資訊對話框 */}
-      <Dialog open={showNetworkInfo} onOpenChange={setShowNetworkInfo}>
-        <DialogContent className="bg-black/90 border-gray-700 text-white">
-          <DialogHeader>
-            <DialogTitle>{language === "zh" ? "網路狀態" : "Network Status"}</DialogTitle>
-            <DialogDescription className="text-gray-300">
-              {language === "zh" ? "即時網路連接資訊" : "Real-time network connection information"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm text-gray-400">{language === "zh" ? "連接品質" : "Connection Quality"}</Label>
-                <div className={`flex items-center gap-2 ${getNetworkStatusColor(networkStatus.quality)}`}>
-                  {getNetworkStatusIcon(networkStatus.quality)}
-                  <span className="capitalize">{networkStatus.quality}</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm text-gray-400">{language === "zh" ? "延遲" : "Latency"}</Label>
-                <div className="text-lg font-mono">{networkStatus.latency}ms</div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm text-gray-400">{language === "zh" ? "頻寬" : "Bandwidth"}</Label>
-                <div className="text-lg font-mono">{networkStatus.bandwidth.toFixed(1)} Mbps</div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm text-gray-400">{language === "zh" ? "穩定性" : "Stability"}</Label>
-                <div className="flex items-center gap-2">
-                  <Progress value={networkStatus.stability} className="flex-1 h-2" />
-                  <span className="text-sm">{networkStatus.stability.toFixed(0)}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm text-gray-400">{language === "zh" ? "緩衝健康度" : "Buffer Health"}</Label>
-              <div className="flex items-center gap-2">
-                <Progress value={viewerState.bufferHealth} className="flex-1 h-2" />
-                <span className="text-sm">{viewerState.bufferHealth.toFixed(0)}%</span>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-gray-700">
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>{language === "zh" ? "設備ID" : "Device ID"}:</span>
-                <span className="font-mono">{deviceId.slice(0, 8)}...</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400 mt-1">
-                <span>{language === "zh" ? "會話ID" : "Session ID"}:</span>
-                <span className="font-mono">{sessionId.slice(0, 8)}...</span>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      </main>
     </div>
   )
 }
-
-// 添加必要的類型聲明
-interface Label {
-  className?: string
-  children: React.ReactNode
-}
-
-const Label: React.FC<Label> = ({ className, children }) => <label className={className}>{children}</label>

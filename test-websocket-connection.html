@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket連接診斷工具</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+            margin: 20px 0;
+        }
+        .log .timestamp {
+            color: #6c757d;
+            margin-right: 10px;
+        }
+        .log .success {
+            color: #28a745;
+        }
+        .log .error {
+            color: #dc3545;
+        }
+        .log .info {
+            color: #007bff;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .config {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        input {
+            width: 200px;
+            padding: 5px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 WebSocket連接診斷工具</h1>
+        <p>用於診斷VR多設備系統的WebSocket/Socket.io連接問題</p>
+        
+        <div class="config">
+            <h3>📊 連接配置</h3>
+            <label>服務器地址: 
+                <input type="text" id="serverUrl" value="http://localhost:5001" />
+            </label>
+            <br>
+            <label>傳輸方式: 
+                <select id="transports">
+                    <option value="polling,websocket">Polling + WebSocket</option>
+                    <option value="websocket">僅WebSocket</option>
+                    <option value="polling">僅Polling</option>
+                </select>
+            </label>
+        </div>
+        
+        <div id="connectionStatus" class="status disconnected">
+            🔴 未連接
+        </div>
+        
+        <div class="controls">
+            <button id="connectBtn">🚀 連接</button>
+            <button id="disconnectBtn" disabled>🛑 斷開</button>
+            <button id="testBtn" disabled>🧪 測試功能</button>
+            <button id="clearBtn">🗑️ 清除日誌</button>
+        </div>
+        
+        <div class="log" id="log">
+            <div class="timestamp">[等待連接...]</div>
+        </div>
+        
+        <div class="config">
+            <h3>📝 診斷說明</h3>
+            <ul>
+                <li><strong>修復前問題</strong>：使用 <code>ws://localhost:5001</code> 會導致握手失敗</li>
+                <li><strong>修復後方案</strong>：使用 <code>http://localhost:5001</code> + 允許polling回退</li>
+                <li><strong>傳輸順序</strong>：先嘗試polling建立連接，然後升級到websocket</li>
+                <li><strong>錯誤處理</strong>：增加了連接重試和錯誤日誌</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        const log = document.getElementById('log');
+        const status = document.getElementById('connectionStatus');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const testBtn = document.getElementById('testBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const serverUrl = document.getElementById('serverUrl');
+        const transports = document.getElementById('transports');
+
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span><span class="${type}">${message}</span>`;
+            log.appendChild(logEntry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function updateStatus(text, className) {
+            status.textContent = text;
+            status.className = `status ${className}`;
+        }
+
+        function updateButtons(connected) {
+            connectBtn.disabled = connected;
+            disconnectBtn.disabled = !connected;
+            testBtn.disabled = !connected;
+        }
+
+        connectBtn.addEventListener('click', () => {
+            const url = serverUrl.value;
+            const transportMethods = transports.value.split(',');
+            
+            addLog(`🚀 嘗試連接到: ${url}`, 'info');
+            addLog(`📡 傳輸方式: ${transportMethods.join(', ')}`, 'info');
+            
+            updateStatus('🟡 連接中...', 'connecting');
+            
+            socket = io(url, {
+                transports: transportMethods,
+                timeout: 10000,
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                forceNew: true
+            });
+
+            socket.on('connect', () => {
+                addLog('✅ Socket.io連接成功!', 'success');
+                addLog(`🆔 連接ID: ${socket.id}`, 'info');
+                addLog(`🚀 傳輸方式: ${socket.io.engine.transport.name}`, 'info');
+                updateStatus('🟢 已連接', 'connected');
+                updateButtons(true);
+            });
+
+            socket.on('disconnect', (reason) => {
+                addLog(`❌ 連接斷開: ${reason}`, 'error');
+                updateStatus('🔴 已斷開', 'disconnected');
+                updateButtons(false);
+            });
+
+            socket.on('connect_error', (error) => {
+                addLog(`❌ 連接錯誤: ${error.message}`, 'error');
+                addLog(`🔍 錯誤類型: ${error.type || 'unknown'}`, 'error');
+                updateStatus('🔴 連接失敗', 'disconnected');
+                updateButtons(false);
+            });
+
+            socket.on('reconnect', (attemptNumber) => {
+                addLog(`🔄 重新連接成功 (嘗試 ${attemptNumber})`, 'success');
+            });
+
+            socket.on('reconnect_attempt', (attemptNumber) => {
+                addLog(`🔄 重連嘗試 ${attemptNumber}...`, 'info');
+            });
+
+            socket.on('reconnect_error', (error) => {
+                addLog(`❌ 重連失敗: ${error.message}`, 'error');
+            });
+
+            socket.on('reconnect_failed', () => {
+                addLog('❌ 重連失敗，已達到最大嘗試次數', 'error');
+            });
+
+            // 監聽VR系統特定事件
+            socket.on('device-joined', (data) => {
+                addLog(`📱 設備加入: ${JSON.stringify(data)}`, 'success');
+            });
+
+            socket.on('device-left', (data) => {
+                addLog(`📱 設備離開: ${JSON.stringify(data)}`, 'info');
+            });
+
+            socket.on('video-sync', (data) => {
+                addLog(`🎥 視頻同步: ${data.type}`, 'success');
+            });
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                addLog('🛑 主動斷開連接', 'info');
+                socket.disconnect();
+                socket = null;
+            }
+        });
+
+        testBtn.addEventListener('click', () => {
+            if (socket && socket.connected) {
+                addLog('🧪 開始功能測試...', 'info');
+                
+                // 測試創建會話
+                const testSessionCode = 'TEST-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+                socket.emit('create-session', { sessionCode: testSessionCode });
+                addLog(`📝 發送創建會話: ${testSessionCode}`, 'info');
+                
+                // 測試設備加入
+                setTimeout(() => {
+                    const testDevice = {
+                        deviceId: 'TEST-DEVICE-001',
+                        deviceModel: '測試設備',
+                        sessionCode: testSessionCode
+                    };
+                    socket.emit('join-session', testDevice);
+                    addLog(`📱 發送設備加入: ${JSON.stringify(testDevice)}`, 'info');
+                }, 1000);
+                
+                // 測試視頻播放
+                setTimeout(() => {
+                    const testVideo = {
+                        sessionCode: testSessionCode,
+                        videoId: 'test123',
+                        videoUrl: 'https://example.com/test.mp4',
+                        startTime: 0
+                    };
+                    socket.emit('play-video', testVideo);
+                    addLog(`🎥 發送視頻播放: ${JSON.stringify(testVideo)}`, 'info');
+                }, 2000);
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            log.innerHTML = '<div class="timestamp">[日誌已清除]</div>';
+        });
+
+        // 頁面加載時的初始化
+        addLog('🔧 WebSocket診斷工具已啟動', 'info');
+        addLog('💡 請確保VR後端服務器正在運行在端口5001', 'info');
+        addLog('🔗 修復說明：使用http://協議而不是ws://協議', 'info');
+    </script>
+</body>
+</html>
+
+
+
+
+
+

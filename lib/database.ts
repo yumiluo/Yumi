@@ -1,135 +1,69 @@
-// 模擬數據庫存儲
-interface DatabaseSchema {
-  videos: VRVideo[]
-  devices: DeviceInfo[]
-  mobileDevices: MobileDeviceInfo[]
-  users: User[]
-}
+import mongoose from 'mongoose';
 
-class LocalDatabase {
-  private data: DatabaseSchema = {
-    videos: [],
-    devices: [],
-    mobileDevices: [],
-    users: [],
-  }
+// MongoDB Atlas連接URI
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://your-username:your-password@cluster0.mongodb.net/vr-travel?retryWrites=true&w=majority';
 
-  constructor() {
-    this.loadFromStorage()
-  }
+// 數據庫連接選項
+const connectOptions = {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  maxPoolSize: 10,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  bufferCommands: false,
+  bufferMaxEntries: 0,
+};
 
-  private loadFromStorage() {
-    try {
-      const stored = localStorage.getItem("vr-video-manager-db")
-      if (stored) {
-        this.data = JSON.parse(stored)
-        // 確保新字段存在
-        if (!this.data.mobileDevices) {
-          this.data.mobileDevices = []
-        }
-      }
-    } catch (error) {
-      console.error("Failed to load from storage:", error)
+// 數據庫連接函數
+export async function connectDatabase() {
+  try {
+    if (mongoose.connection.readyState === 1) {
+      console.log('✅ MongoDB已連接');
+      return;
     }
-  }
 
-  private saveToStorage() {
-    try {
-      localStorage.setItem("vr-video-manager-db", JSON.stringify(this.data))
-    } catch (error) {
-      console.error("Failed to save to storage:", error)
-    }
-  }
+    await mongoose.connect(MONGODB_URI, connectOptions);
+    console.log('✅ MongoDB Atlas連接成功');
+    
+    // 監聽連接事件
+    mongoose.connection.on('connected', () => {
+      console.log('🔌 MongoDB連接已建立');
+    });
 
-  // Video operations
-  async saveVideo(video: VRVideo): Promise<VRVideo> {
-    const existingIndex = this.data.videos.findIndex((v) => v.id === video.id)
-    if (existingIndex >= 0) {
-      this.data.videos[existingIndex] = video
-    } else {
-      this.data.videos.push(video)
-    }
-    this.saveToStorage()
-    return video
-  }
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ MongoDB連接錯誤:', err);
+    });
 
-  async getVideos(): Promise<VRVideo[]> {
-    return [...this.data.videos]
-  }
+    mongoose.connection.on('disconnected', () => {
+      console.log('🔌 MongoDB連接已斷開');
+    });
 
-  async deleteVideo(id: string): Promise<boolean> {
-    const initialLength = this.data.videos.length
-    this.data.videos = this.data.videos.filter((v) => v.id !== id)
-    this.saveToStorage()
-    return this.data.videos.length < initialLength
-  }
+    // 優雅關閉
+    process.on('SIGINT', async () => {
+      await mongoose.connection.close();
+      console.log('✅ MongoDB連接已關閉');
+      process.exit(0);
+    });
 
-  // Device operations
-  async saveDevice(device: DeviceInfo): Promise<DeviceInfo> {
-    const existingIndex = this.data.devices.findIndex((d) => d.id === device.id)
-    if (existingIndex >= 0) {
-      this.data.devices[existingIndex] = device
-    } else {
-      this.data.devices.push(device)
-    }
-    this.saveToStorage()
-    return device
-  }
-
-  async getDevices(): Promise<DeviceInfo[]> {
-    return [...this.data.devices]
-  }
-
-  async deleteDevice(id: string): Promise<boolean> {
-    const initialLength = this.data.devices.length
-    this.data.devices = this.data.devices.filter((d) => d.id !== id)
-    this.saveToStorage()
-    return this.data.devices.length < initialLength
-  }
-
-  // Mobile Device operations
-  async saveMobileDevice(device: MobileDeviceInfo): Promise<MobileDeviceInfo> {
-    const existingIndex = this.data.mobileDevices.findIndex((d) => d.id === device.id)
-    if (existingIndex >= 0) {
-      this.data.mobileDevices[existingIndex] = device
-    } else {
-      this.data.mobileDevices.push(device)
-    }
-    this.saveToStorage()
-    return device
-  }
-
-  async getMobileDevices(): Promise<MobileDeviceInfo[]> {
-    return [...this.data.mobileDevices]
-  }
-
-  async deleteMobileDevice(id: string): Promise<boolean> {
-    const initialLength = this.data.mobileDevices.length
-    this.data.mobileDevices = this.data.mobileDevices.filter((d) => d.id !== id)
-    this.saveToStorage()
-    return this.data.mobileDevices.length < initialLength
-  }
-
-  // User operations
-  async saveUser(user: User): Promise<User> {
-    const existingIndex = this.data.users.findIndex((u) => u.id === user.id)
-    if (existingIndex >= 0) {
-      this.data.users[existingIndex] = user
-    } else {
-      this.data.users.push(user)
-    }
-    this.saveToStorage()
-    return user
-  }
-
-  async getUsers(): Promise<User[]> {
-    return [...this.data.users]
+  } catch (error) {
+    console.error('❌ MongoDB連接失敗:', error);
+    throw error;
   }
 }
 
-export const db = new LocalDatabase()
+// 斷開數據庫連接
+export async function disconnectDatabase() {
+  try {
+    await mongoose.connection.close();
+    console.log('✅ MongoDB連接已關閉');
+  } catch (error) {
+    console.error('❌ 關閉MongoDB連接失敗:', error);
+  }
+}
 
-import type { VRVideo } from "./video-manager"
-import type { DeviceInfo } from "./device-manager"
-import type { MobileDeviceInfo } from "./mobile-device-manager"
-import type { User } from "./auth"
+// 檢查數據庫連接狀態
+export function isDatabaseConnected() {
+  return mongoose.connection.readyState === 1;
+}
+
+export default mongoose;

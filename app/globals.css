@@ -2,6 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
+/* VR模式樣式 */
+body.vr-mode {
+  overflow: hidden !important;
+  background-color: #000 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+html.vr-mode,
+body.vr-mode {
+  background-color: #000 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.vr-mode::-webkit-scrollbar {
+  display: none;
+}
+
+/* 全屏模式隱藏瀏覽器UI */
+body.vr-mode header,
+body.vr-mode nav,
+body.vr-mode footer,
+body.vr-mode .browser-ui {
+  display: none !important;
+}
+
+/* 隱藏瀏覽器默認的全屏提示 */
+body.vr-mode::before,
+body.vr-mode::after {
+  display: none !important;
+}
+
+/* VR模式下的全局樣式 */
+body.vr-mode * {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* 隱藏VR模式下的滾動條 */
+body.vr-mode {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* VR模式下的iframe樣式 */
+body.vr-mode iframe {
+  border: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  outline: none !important;
+}
+
+/* 確保VR模式下的body和html完全覆蓋 */
+body.vr-mode,
+html.vr-mode {
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

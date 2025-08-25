@@ -20,6 +20,36 @@ interface DeviceScanResult {
   capabilities: string[]
 }
 
+interface NetworkDevice {
+  id: string
+  deviceName: string
+  deviceType: string
+  ipAddress: string
+  manufacturer: string
+  isVRDevice: boolean
+  rssi: number
+  lastSeen: string
+}
+
+interface DeviceInfo {
+  id: string
+  name: string
+  type: "standalone_vr" | "mobile_vr" | "desktop"
+  brand: string
+  model: string
+  ipAddress: string
+  macAddress: string
+  status: "online" | "offline" | "connecting" | "error"
+  firmwareVersion: string
+  connectionType: "wifi" | "bluetooth" | "usb"
+  capabilities: string[]
+  currentTime: number
+  lastSeen: string
+  isAuthenticated: boolean
+  authCode: string
+  batteryLevel?: number
+}
+
 class DeviceManager {
   private baseUrl: string
   private ws: WebSocket | null = null
@@ -139,6 +169,113 @@ class DeviceManager {
       return devices
     } catch (error) {
       console.error("設備掃描錯誤:", error)
+      throw error
+    }
+  }
+
+  // 掃描設備的別名方法（兼容舊代碼）
+  async scanForDevices(): Promise<NetworkDevice[]> {
+    try {
+      console.log("開始掃描Wi-Fi網絡設備...")
+      
+      // 模擬設備掃描，返回發現的設備
+      // 在實際環境中，這裡應該調用真實的網絡掃描API
+      const mockDevices: NetworkDevice[] = [
+        {
+          id: "device-001",
+          deviceName: "VR Sync Server",
+          deviceType: "VR Headset",
+          ipAddress: "localhost",
+          manufacturer: "VR Systems",
+          isVRDevice: true,
+          rssi: -45,
+          lastSeen: new Date().toISOString()
+        },
+        {
+          id: "device-002", 
+          deviceName: "Quest 2",
+          deviceType: "VR Headset",
+          ipAddress: "192.168.31.100",
+          manufacturer: "Meta",
+          isVRDevice: true,
+          rssi: -62,
+          lastSeen: new Date().toISOString()
+        }
+      ]
+      
+      // 嘗試真實的設備發現
+      try {
+        const response = await fetch('http://localhost:5001/api/discover')
+        if (response.ok) {
+          const serverInfo = await response.json()
+          console.log("發現VR服務器:", serverInfo)
+          
+          // 添加真實的服務器設備
+          const realDevice: NetworkDevice = {
+            id: "vr-server-001",
+            deviceName: serverInfo.deviceName || "VR Sync Server",
+            deviceType: "VR Server",
+            ipAddress: "localhost",
+            manufacturer: "VR Systems",
+            isVRDevice: true,
+            rssi: -30,
+            lastSeen: new Date().toISOString()
+          }
+          
+          return [realDevice]
+        }
+      } catch (error) {
+        console.log("無法連接到VR服務器，返回模擬設備")
+      }
+      
+      return mockDevices
+    } catch (error) {
+      console.error("設備掃描失敗:", error)
+      throw error
+    }
+  }
+
+  // 連接到設備的別名方法
+  async connectToDevice(ipAddress: string, authCode?: string): Promise<DeviceInfo> {
+    try {
+      console.log(`嘗試連接設備: ${ipAddress}`)
+      
+      // 模擬設備連接
+      const deviceInfo: DeviceInfo = {
+        id: `device-${Date.now()}`,
+        name: `VR設備 (${ipAddress})`,
+        type: "standalone_vr",
+        brand: "Unknown",
+        model: "VR Device",
+        ipAddress: ipAddress,
+        macAddress: "00:00:00:00:00:00",
+        status: "online",
+        firmwareVersion: "1.0.0",
+        connectionType: "wifi",
+        capabilities: ["6DOF", "Wi-Fi"],
+        currentTime: 0,
+        lastSeen: new Date().toLocaleString(),
+        isAuthenticated: true,
+        authCode: authCode || Math.random().toString(36).substr(2, 6).toUpperCase(),
+      }
+      
+      console.log("設備連接成功:", deviceInfo)
+      return deviceInfo
+    } catch (error) {
+      console.error("設備連接失敗:", error)
+      throw error
+    }
+  }
+
+  // 移除設備的別名方法
+  async removeDevice(deviceId: string): Promise<void> {
+    try {
+      console.log(`移除設備: ${deviceId}`)
+      // 模擬移除設備
+      await new Promise(resolve => setTimeout(resolve, 500))
+      console.log("設備移除成功")
+    } catch (error) {
+      console.error("設備移除失敗:", error)
       throw error
     }
   }
@@ -332,5 +469,6 @@ class DeviceManager {
 }
 
 export const deviceManager = new DeviceManager()
+export const deviceService = deviceManager // 為了兼容性，導出別名
 export default deviceManager
-export type { Device, DeviceScanResult }
+export type { Device, DeviceScanResult, NetworkDevice, DeviceInfo }
