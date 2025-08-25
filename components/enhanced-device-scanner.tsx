@@ -20,8 +20,6 @@ import {
   Settings,
   Zap
 } from "lucide-react"
-import { enhancedDeviceManager } from "@/lib/enhanced-device-manager"
-import { websocketManager } from "@/lib/websocket-manager"
 import { toast } from "@/components/ui/use-toast"
 
 interface Device {
@@ -59,119 +57,33 @@ export function EnhancedDeviceScanner() {
   const [activeTab, setActiveTab] = useState<string>('all')
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false)
 
-  // 初始化WebSocket連接
+  // 初始化連接
   useEffect(() => {
-    const initializeConnection = async () => {
+    // 檢查API連接
+    const checkConnection = async () => {
       try {
-        const connected = await websocketManager.connect()
-        if (connected) {
+        const response = await fetch('/api/health')
+        if (response.ok) {
           setConnectionStatus('connected')
           toast({
             title: "連接成功",
-            description: "WebSocket連接已建立",
+            description: "API連接已建立",
             variant: "default"
           })
+        } else {
+          setConnectionStatus('error')
         }
       } catch (error) {
-        console.error('WebSocket connection failed:', error)
         setConnectionStatus('error')
         toast({
           title: "連接失敗",
-          description: "無法連接到服務器",
+          description: "無法連接到API",
           variant: "destructive"
-          })
+        })
       }
     }
 
-    initializeConnection()
-
-    // 設置事件監聽器
-    const handleConnected = () => {
-      setConnectionStatus('connected')
-      toast({
-        title: "重新連接成功",
-        description: "WebSocket連接已恢復",
-        variant: "default"
-      })
-    }
-
-    const handleDisconnected = () => {
-      setConnectionStatus('disconnected')
-      toast({
-        title: "連接斷開",
-        description: "WebSocket連接已斷開",
-        variant: "destructive"
-      })
-    }
-
-    const handleDeviceAdded = (device: Device) => {
-      setDevices(prev => {
-        const existing = prev.find(d => d.id === device.id)
-        if (!existing) {
-          return [...prev, device]
-        }
-        return prev
-      })
-    }
-
-    const handleDeviceUpdated = (device: Device) => {
-      setDevices(prev => 
-        prev.map(d => d.id === device.id ? device : d)
-      )
-    }
-
-    const handleDeviceRemoved = (device: Device) => {
-      setDevices(prev => prev.filter(d => d.id !== device.id))
-    }
-
-    const handleScanStarted = () => {
-      setScanProgress(prev => ({ ...prev, isScanning: true, progress: 0 }))
-    }
-
-    const handleScanCompleted = (discoveredDevices: Device[]) => {
-      setScanProgress(prev => ({ 
-        ...prev, 
-        isScanning: false, 
-        progress: 100,
-        discoveredCount: discoveredDevices.length
-      }))
-      
-      toast({
-        title: "掃描完成",
-        description: `發現 ${discoveredDevices.length} 個設備`,
-        variant: "default"
-      })
-    }
-
-    const handleScanError = (error: any) => {
-      setScanProgress(prev => ({ 
-        ...prev, 
-        isScanning: false, 
-        errorCount: prev.errorCount + 1
-      }))
-      
-      toast({
-        title: "掃描錯誤",
-        description: error.message || "設備掃描失敗",
-        variant: "destructive"
-      })
-    }
-
-    // 綁定事件
-    websocketManager.on('connected', handleConnected)
-    websocketManager.on('disconnected', handleDisconnected)
-    enhancedDeviceManager.on('deviceAdded', handleDeviceAdded)
-    enhancedDeviceManager.on('deviceUpdated', handleDeviceUpdated)
-    enhancedDeviceManager.on('deviceRemoved', handleDeviceRemoved)
-    enhancedDeviceManager.on('scanStarted', handleScanStarted)
-    enhancedDeviceManager.on('scanCompleted', handleScanCompleted)
-    enhancedDeviceManager.on('scanError', handleScanError)
-
-    return () => {
-      // 清理事件監聽器
-      websocketManager.removeAllListeners()
-      enhancedDeviceManager.removeAllListeners()
-    }
+    checkConnection()
   }, [])
 
   // 自動刷新
@@ -211,10 +123,24 @@ export function EnhancedDeviceScanner() {
         })
       }, 200)
 
-      const devices = await enhancedDeviceManager.scanDevices({
-        methods: methods as any,
-        timeout: 10000
+      // 調用API掃描設備
+      const response = await fetch('/api/devices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'scan',
+          methods: methods
+        })
       })
+
+      if (!response.ok) {
+        throw new Error('掃描請求失敗')
+      }
+
+      const result = await response.json()
+      const devices = result.devices || []
 
       clearInterval(progressInterval)
       setScanProgress(prev => ({ ...prev, progress: 100 }))
@@ -251,9 +177,29 @@ export function EnhancedDeviceScanner() {
   // 連接設備
   const connectDevice = useCallback(async (deviceId: string) => {
     try {
-      const result = await enhancedDeviceManager.connectDevice(deviceId)
+      const response = await fetch('/api/devices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'connect',
+          deviceId: deviceId
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('連接請求失敗')
+      }
+
+      const result = await response.json()
       
       if (result.success) {
+        // 更新本地設備狀態
+        setDevices(prev => 
+          prev.map(d => d.id === deviceId ? { ...d, status: 'connected' } : d)
+        )
+        
         toast({
           title: "連接成功",
           description: `${result.device.name} 已連接`,
@@ -279,9 +225,29 @@ export function EnhancedDeviceScanner() {
   // 斷開設備
   const disconnectDevice = useCallback(async (deviceId: string) => {
     try {
-      const success = await enhancedDeviceManager.disconnectDevice(deviceId)
+      const response = await fetch('/api/devices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'disconnect',
+          deviceId: deviceId
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('斷開請求失敗')
+      }
+
+      const result = await response.json()
       
-      if (success) {
+      if (result.success) {
+        // 更新本地設備狀態
+        setDevices(prev => 
+          prev.map(d => d.id === deviceId ? { ...d, status: 'disconnected' } : d)
+        )
+        
         toast({
           title: "斷開成功",
           description: "設備已斷開連接",
@@ -290,7 +256,7 @@ export function EnhancedDeviceScanner() {
       } else {
         toast({
           title: "斷開失敗",
-          description: "無法斷開設備連接",
+          description: result.error || "無法斷開設備連接",
           variant: "destructive"
         })
       }
@@ -307,8 +273,11 @@ export function EnhancedDeviceScanner() {
   // 刷新設備列表
   const refreshDevices = useCallback(async () => {
     try {
-      const currentDevices = enhancedDeviceManager.getDevices()
-      setDevices(currentDevices)
+      const response = await fetch('/api/devices')
+      if (response.ok) {
+        const result = await response.json()
+        setDevices(result.devices || [])
+      }
     } catch (error) {
       console.error('Failed to refresh devices:', error)
     }
@@ -338,7 +307,17 @@ export function EnhancedDeviceScanner() {
 
   // 獲取連接統計
   const connectionStats = useMemo(() => {
-    return enhancedDeviceManager.getConnectionStats()
+    const totalDevices = devices.length
+    const connectedDevices = devices.filter(d => d.status === 'connected').length
+    const disconnectedDevices = devices.filter(d => d.status === 'disconnected').length
+    const errorDevices = devices.filter(d => d.status === 'error').length
+
+    return {
+      totalDevices,
+      connectedDevices,
+      disconnectedDevices,
+      errorDevices
+    }
   }, [devices])
 
   // 獲取狀態圖標
