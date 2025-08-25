@@ -28,20 +28,22 @@ export default function QRConnectPage() {
 
   // 生成連接數據
   useEffect(() => {
-    const connectionData = {
-      url: window.location.origin,
-      device: deviceInfo,
-      timestamp: new Date().toISOString(),
-      features: [
-        '設備掃描',
-        '設備管理',
-        'VR播放器',
-        'YouTube集成',
-        '雲端數據'
-      ]
+    if (typeof window !== 'undefined') {
+      const connectionData = {
+        url: window.location.origin,
+        device: deviceInfo,
+        timestamp: new Date().toISOString(),
+        features: [
+          '設備掃描',
+          '設備管理',
+          'VR播放器',
+          'YouTube集成',
+          '雲端數據'
+        ]
+      }
+      
+      setQrCodeData(JSON.stringify(connectionData, null, 2))
     }
-    
-    setQrCodeData(JSON.stringify(connectionData, null, 2))
   }, [deviceInfo])
 
   // 複製連接信息
@@ -113,7 +115,7 @@ export default function QRConnectPage() {
               <Label>連接網址</Label>
               <div className="flex gap-2">
                 <Input 
-                  value={window.location.origin} 
+                  value={typeof window !== 'undefined' ? window.location.origin : ''} 
                   readOnly 
                   className="flex-1"
                 />
