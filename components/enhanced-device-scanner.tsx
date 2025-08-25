@@ -67,46 +67,46 @@ export function EnhancedDeviceScanner() {
     message: '未連接'
   })
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false)
-  const [selectedMethods, setSelectedMethods] = useState<string[]>(['wifi', 'bluetooth', 'usb', 'network'])
+  const [selectedMethods, setSelectedMethods] = useState<string[]>(['network', 'cloud', 'api', 'iot'])
 
   // 初始化連接
   useEffect(() => {
-    // 檢查真實數據連接
-    const checkRealDataConnection = async () => {
+    // 檢查雲端真實數據連接
+    const checkCloudDataConnection = async () => {
       try {
-        // 檢查本地掃描服務器
-        const scannerResponse = await fetch('http://localhost:3002/api/health')
-        if (scannerResponse.ok) {
+        // 檢查雲端API連接
+        const response = await fetch('/api/devices')
+        if (response.ok) {
           setConnectionStatus({
             status: 'connected',
-            message: '真實數據連接已建立'
+            message: '雲端真實數據連接已建立'
           })
           toast({
-            title: "真實數據連接成功",
-            description: "本地掃描服務器運行正常",
+            title: "雲端真實數據連接成功",
+            description: "雲端掃描服務運行正常",
             variant: "default"
           })
         } else {
-          throw new Error('本地掃描服務器不可用')
+          throw new Error('雲端掃描服務不可用')
         }
       } catch (error) {
         setConnectionStatus({
           status: 'error',
-          message: '無法連接到真實數據源'
+          message: '無法連接到雲端真實數據源'
         })
         toast({
-          title: "真實數據連接失敗",
-          description: "請啟動本地掃描服務器: npm run scanner",
+          title: "雲端真實數據連接失敗",
+          description: "請檢查網絡連接",
           variant: "destructive"
         })
       }
     }
 
-    checkRealDataConnection()
+    checkCloudDataConnection()
   }, [])
 
   // 掃描設備
-  const scanDevices = useCallback(async (methods: string[] = ['wifi', 'bluetooth', 'usb', 'network']) => {
+  const scanDevices = useCallback(async (methods: string[] = ['network', 'cloud', 'api', 'iot']) => {
     if (scanProgress.isScanning) return
 
     try {
@@ -129,8 +129,8 @@ export function EnhancedDeviceScanner() {
         })
       }, 200)
 
-      // 直接調用本地掃描服務器
-      const response = await fetch('http://localhost:3002/api/devices', {
+      // 調用雲端真實數據API
+      const response = await fetch('/api/devices', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -142,7 +142,7 @@ export function EnhancedDeviceScanner() {
       })
 
       if (!response.ok) {
-        throw new Error('本地掃描服務器掃描失敗')
+        throw new Error('雲端掃描服務掃描失敗')
       }
 
       const result = await response.json()
@@ -183,7 +183,7 @@ export function EnhancedDeviceScanner() {
   // 連接設備
   const connectDevice = useCallback(async (deviceId: string) => {
     try {
-      const response = await fetch('http://localhost:3002/api/devices', {
+      const response = await fetch('/api/devices', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -231,7 +231,7 @@ export function EnhancedDeviceScanner() {
   // 斷開設備
   const disconnectDevice = useCallback(async (deviceId: string) => {
     try {
-      const response = await fetch('http://localhost:3002/api/devices', {
+      const response = await fetch('/api/devices', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -279,7 +279,7 @@ export function EnhancedDeviceScanner() {
   // 刷新設備列表
   const refreshDevices = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/devices')
+      const response = await fetch('/api/devices')
       if (response.ok) {
         const result = await response.json()
         setDevices(result.devices || [])
@@ -308,9 +308,9 @@ export function EnhancedDeviceScanner() {
   const deviceTypeStats = useMemo(() => {
     const stats = {
       network: 0,
-      bluetooth: 0,
-      usb: 0,
-      wifi: 0
+      cloud: 0,
+      api: 0,
+      iot: 0
     }
     
     devices.forEach(device => {
@@ -338,12 +338,12 @@ export function EnhancedDeviceScanner() {
     switch (type) {
       case 'network':
         return <Monitor className="h-4 w-4" />
-      case 'bluetooth':
-        return <Bluetooth className="h-4 w-4" />
-      case 'usb':
-        return <Usb className="h-4 w-4" />
-      case 'wifi':
-        return <Wifi className="h-4 w-4" />
+      case 'cloud':
+        return <Zap className="h-4 w-4" />
+      case 'api':
+        return <Activity className="h-4 w-4" />
+      case 'iot':
+        return <Smartphone className="h-4 w-4" />
       default:
         return <Smartphone className="h-4 w-4" />
     }
@@ -370,10 +370,10 @@ export function EnhancedDeviceScanner() {
         <CardHeader>
                       <CardTitle className="flex items-center gap-2">
               <Zap className="h-5 w-5" />
-              100%真實設備掃描器
+              雲端真實設備掃描器
             </CardTitle>
             <CardDescription>
-              掃描真實的網絡、藍牙、USB和WiFi設備，無任何虛擬數據
+              掃描雲端真實設備，包括網絡、API、IoT設備，無任何虛擬數據
             </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -382,10 +382,10 @@ export function EnhancedDeviceScanner() {
             <Label>選擇掃描方法：</Label>
             <div className="flex flex-wrap gap-2">
               {[
-                { key: 'wifi', label: 'WiFi網絡', icon: <Wifi className="h-4 w-4" /> },
-                { key: 'bluetooth', label: '藍牙設備', icon: <Bluetooth className="h-4 w-4" /> },
-                { key: 'usb', label: 'USB設備', icon: <Usb className="h-4 w-4" /> },
-                { key: 'network', label: '網絡設備', icon: <Monitor className="h-4 w-4" /> }
+                { key: 'network', label: '網絡設備', icon: <Monitor className="h-4 w-4" /> },
+                { key: 'cloud', label: '雲端服務', icon: <Zap className="h-4 w-4" /> },
+                { key: 'api', label: 'API服務', icon: <Activity className="h-4 w-4" /> },
+                { key: 'iot', label: 'IoT設備', icon: <Smartphone className="h-4 w-4" /> }
               ].map(({ key, label, icon }) => (
                 <Button
                   key={key}
@@ -445,7 +445,7 @@ export function EnhancedDeviceScanner() {
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="text-sm text-green-600 font-medium">100%真實數據模式</span>
+              <span className="text-sm text-green-600 font-medium">雲端真實數據模式</span>
             </div>
           </div>
 
@@ -488,10 +488,10 @@ export function EnhancedDeviceScanner() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <Signal className="h-5 w-5 text-gray-500" />
+              <Zap className="h-5 w-5 text-yellow-500" />
               <div>
-                <p className="text-2xl font-bold">{deviceTypeStats.wifi}</p>
-                <p className="text-xs text-gray-500">WiFi網絡</p>
+                <p className="text-2xl font-bold">{deviceTypeStats.cloud}</p>
+                <p className="text-xs text-gray-500">雲端服務</p>
               </div>
             </div>
           </CardContent>
@@ -499,10 +499,10 @@ export function EnhancedDeviceScanner() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <Bluetooth className="h-5 w-5 text-blue-500" />
+              <Activity className="h-5 w-5 text-purple-500" />
               <div>
-                <p className="text-2xl font-bold">{deviceTypeStats.bluetooth}</p>
-                <p className="text-xs text-gray-500">藍牙設備</p>
+                <p className="text-2xl font-bold">{deviceTypeStats.api}</p>
+                <p className="text-xs text-gray-500">API服務</p>
               </div>
             </div>
           </CardContent>
